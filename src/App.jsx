@@ -101,7 +101,7 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [lastSync, setLastSync] = useState('Initializing...');
+  const [lastSync, setLastSync] = useState('Connecting to Cloud...');
   const [dbData, setDbData] = useState(initialRawDatabase);
   const [supabaseClient, setSupabaseClient] = useState(null);
 
@@ -151,13 +151,14 @@ export default function App() {
         fetchCloudData(client);
       } catch (err) {
         console.error("Dependency loading failed", err);
+        showToast("Error loading external libraries.");
         setIsLoading(false);
       }
     };
     loadDependencies();
   }, []);
 
-  // 2. Persistent Data Fetching
+  // 2. Persistent Data Fetching directly from Supabase Cloud
   const fetchCloudData = async (client) => {
     if (!client) return;
     try {
@@ -165,20 +166,25 @@ export default function App() {
       
       if (error) {
         if (error.code === 'PGRST116') {
-          setLastSync("Cloud Initialized (Empty)");
+          // Empty DB, insert row 1
+          await client.from('railmadad_sync').insert([{ id: 1, json_data: initialRawDatabase }]);
+          setLastSync("Cloud DB Initialized");
         } else if (error.code === '42501') {
-          setLastSync("Read Blocked (RLS)");
+          setLastSync("Access Denied (RLS Blocked)");
+          showToast("⚠️ Supabase Read Blocked: Please disable Row-Level Security (RLS) in your Supabase SQL Editor.");
         } else {
-          setLastSync("Cloud Offline");
+          setLastSync("Cloud Fetch Failed");
         }
         setIsLoading(false);
         return;
       }
 
+      // Successful Cloud Fetch
       if (data && data.json_data && data.json_data.records) {
         setDbData(data.json_data);
         setLastSync(new Date(data.last_updated || Date.now()).toLocaleTimeString());
         
+        // Auto-adjust dates based on available data
         if (data.json_data.records.length > 0) {
             const sortedDates = [...data.json_data.records].map(r => r.date).sort();
             setFromDate(sortedDates[0]);
@@ -186,7 +192,8 @@ export default function App() {
         }
       }
     } catch (err) { 
-      console.error("Fetch Cloud State failed", err); 
+      console.error("Cloud fetch failed", err);
+      setLastSync("Network Error");
     } finally {
       setIsLoading(false);
     }
@@ -296,7 +303,7 @@ export default function App() {
 
   const { kpis, aiInsights, momData, catMomData, monthsSorted, trainData, uniqueCats, feedbackData, unsatTable, pestTable, shiftData, zoneData, coachData, statusData, availableZones, availableStatuses } = aggregated;
 
-  // --- STABLE FILE PARSER ---
+  // --- STABLE FILE PARSER WITH CLOUD SYNC ---
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file || !window.XLSX || !supabaseClient) {
@@ -343,6 +350,9 @@ export default function App() {
         };
 
         const idMap = new window.Map(); 
+        
+        // --- CRITICAL APPEND LOGIC ---
+        // We load all previously synced records from state (dbData) into our map first.
         const baseRecords = dbData.records || [];
         baseRecords.forEach(r => idMap.set(String(r.id), r));
 
@@ -358,6 +368,8 @@ export default function App() {
                 if (!refNo || !createdOn) continue; 
 
                 const recordId = String(refNo).trim();
+                
+                // If it already exists in the cloud dbData, skip it!
                 if (idMap.has(recordId)) continue;
 
                 const parsedObj = parseRawDate(createdOn);
@@ -377,6 +389,7 @@ export default function App() {
                 const matchTrain = rawTrain.match(/\b\d{4,5}\b/);
                 const trainNo = matchTrain ? matchTrain[0] : (trainStation ? String(trainStation) : 'Unknown');
 
+                // Append the brand new record to the map
                 idMap.set(recordId, {
                     id: recordId,
                     date: parsedObj.date,
@@ -398,35 +411,34 @@ export default function App() {
         }
 
         if (newRecordsAdded > 0) {
+            // newData now contains old records + newly appended records
             const newData = { records: Array.from(idMap.values()) };
             
-            // OPTIMISTIC LOCAL UPDATE
-            setDbData(newData);
-            setLastSync(new Date().toLocaleTimeString());
-            const sortedDates = [...newData.records].map(r => r.date).sort();
-            setFromDate(sortedDates[0]); setToDate(sortedDates[sortedDates.length - 1]);
-            showToast(`✅ Dashboard updated locally with ${newRecordsAdded} new records.`);
+            // Push to Cloud
+            const { error } = await supabaseClient.from('railmadad_sync').upsert({ 
+                id: 1, 
+                json_data: newData, 
+                last_updated: new Date().toISOString() 
+            }, { onConflict: 'id' });
 
-            // CLOUD SYNC
-            try {
-              const { error } = await supabaseClient.from('railmadad_sync').upsert({ 
-                  id: 1, 
-                  json_data: newData, 
-                  last_updated: new Date().toISOString() 
-              }, { onConflict: 'id' });
-
-              if (error) {
-                  if (error.code === '42501') {
-                      showToast("⚠️ Cloud Sync Failed: Row-Level Security policy prevents saving. Enable 'Public Access' in Supabase to keep data after refresh.");
-                  } else {
-                      showToast("⚠️ Cloud Sync failed. Data is only available in this session.");
-                  }
-              }
-            } catch (syncErr) {
-              console.error("Upsert exception", syncErr);
+            if (error) {
+                console.error("Cloud Upsert failed", error);
+                if (error.code === '42501') {
+                    showToast("❌ Cloud Save Failed: Supabase RLS is blocking the save. Please run 'ALTER TABLE railmadad_sync DISABLE ROW LEVEL SECURITY;' in your Supabase SQL Editor.");
+                } else {
+                    showToast("❌ Cloud Sync failed. Check network connection.");
+                }
+            } else {
+                // If cloud save succeeds, update local state
+                setDbData(newData);
+                setLastSync(new Date().toLocaleTimeString() + " (Synced)");
+                const sortedDates = [...newData.records].map(r => r.date).sort();
+                setFromDate(sortedDates[0]); 
+                setToDate(sortedDates[sortedDates.length - 1]);
+                showToast(`✅ Successfully appended ${newRecordsAdded} records to the Cloud DB.`);
             }
         } else {
-            showToast("No new records detected.");
+            showToast("No new records detected (All files duplicate).");
         }
       } catch (err) {
         console.error("Parse Error:", err);
@@ -440,14 +452,19 @@ export default function App() {
   const executeHardReset = async () => {
     if (!supabaseClient) return;
     setShowResetModal(false);
-    showToast("Wiping database...");
-    setDbData(initialRawDatabase); 
-    setFromDate(lastMonthStr); setToDate(todayStr);
-    setSelectedZone('All'); setSelectedStatus('All');
+    showToast("Wiping cloud database...");
+    
     try {
-      await supabaseClient.from('railmadad_sync').upsert({ id: 1, json_data: initialRawDatabase, last_updated: new Date().toISOString() }, { onConflict: 'id' });
-      showToast("✅ Database wiped clean.");
-    } catch (err) { showToast("Cloud reset failed."); }
+      const { error } = await supabaseClient.from('railmadad_sync').upsert({ id: 1, json_data: initialRawDatabase, last_updated: new Date().toISOString() }, { onConflict: 'id' });
+      if (error) throw error;
+
+      setDbData(initialRawDatabase); 
+      setFromDate(lastMonthStr); setToDate(todayStr);
+      setSelectedZone('All'); setSelectedStatus('All');
+      showToast("✅ Database wiped clean in the cloud.");
+    } catch (err) { 
+      showToast("❌ Cloud reset failed. Check RLS settings."); 
+    }
   };
 
   if (isLoading) {
@@ -455,7 +472,7 @@ export default function App() {
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="flex flex-col items-center">
           <Loader2 className="w-12 h-12 text-indigo-600 animate-spin mb-4" />
-          <p className="text-slate-600 font-bold text-lg animate-pulse tracking-wide uppercase">Connecting to Rail Cloud...</p>
+          <p className="text-slate-600 font-bold text-lg animate-pulse tracking-wide uppercase">Connecting to Supabase Cloud...</p>
         </div>
       </div>
     );
@@ -463,13 +480,15 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans text-slate-900 relative">
+      {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 bg-slate-800 text-white px-6 py-4 rounded-xl shadow-2xl z-50 flex items-center animate-bounce border border-slate-700">
           <Sparkles className="w-5 h-5 mr-3 text-indigo-400" />
-          <span className="font-medium text-sm leading-snug">{String(toastMessage)}</span>
+          <span className="font-medium text-sm leading-snug max-w-sm">{String(toastMessage)}</span>
         </div>
       )}
 
+      {/* Hard Reset Modal */}
       {showResetModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white p-6 rounded-2xl shadow-xl max-w-sm w-full border border-slate-100 transform transition-all">
@@ -509,7 +528,7 @@ export default function App() {
                 </>
               )}
            </label>
-           <p className="text-[10px] text-slate-400 mt-3 text-center font-medium italic">Cloud: {String(lastSync)}</p>
+           <p className="text-[10px] text-slate-400 mt-3 text-center font-medium italic">Status: {String(lastSync)}</p>
         </div>
 
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
@@ -528,7 +547,7 @@ export default function App() {
 
         <div className="p-4 border-t border-slate-100 bg-slate-50">
            <button onClick={() => setShowResetModal(true)} className="flex items-center justify-center w-full py-2 text-[11px] font-bold text-rose-500 hover:bg-rose-50 rounded-lg transition-colors mb-4">
-             <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Wipe Entire System
+             <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Wipe Database
            </button>
            <div className="flex items-center justify-center opacity-70 hover:opacity-100 transition-opacity">
              <Cpu className="w-4 h-4 text-indigo-600 mr-2" />
@@ -577,13 +596,13 @@ export default function App() {
              <div className="bg-white p-16 mt-10 rounded-3xl border border-slate-200 flex flex-col items-center justify-center text-center max-w-2xl mx-auto shadow-sm">
                <div className="w-24 h-24 bg-indigo-50 rounded-full flex items-center justify-center mb-6"><FileSpreadsheet className="w-12 h-12 text-indigo-400" /></div>
                <h3 className="text-3xl font-black text-slate-800 tracking-tight">Dashboard Empty</h3>
-               <p className="text-slate-500 mt-4 max-w-md leading-relaxed font-medium">Append your RailMadad Raw CSV export to see real-time analytics.</p>
+               <p className="text-slate-500 mt-4 max-w-md leading-relaxed font-medium">Append your RailMadad Raw CSV export to start the engine. Your data will be saved securely in the cloud.</p>
              </div>
           ) : !kpis || kpis.total === 0 ? (
-             <div className="bg-white p-12 mt-10 rounded-2xl border border-slate-100 flex flex-col items-center justify-center text-center max-w-2xl mx-auto shadow-sm">
+             <div className="bg-white p-12 mt-10 rounded-2xl border border-slate-200 flex flex-col items-center justify-center text-center max-w-2xl mx-auto shadow-sm">
                <Calendar className="w-12 h-12 text-slate-300 mb-4" />
-               <h3 className="text-xl font-bold text-slate-800">No Records Found</h3>
-               <p className="text-slate-500 mt-2 max-w-sm">No data matches your current date, zone, or status filters.</p>
+               <h3 className="text-xl font-bold text-slate-800">No Match</h3>
+               <p className="text-slate-500 mt-2 max-w-sm">Try removing filters or expanding dates.</p>
              </div>
           ) : (
             <>
