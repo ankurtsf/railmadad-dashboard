@@ -10,11 +10,14 @@ import {
   Upload, Bot, Calendar, Trash2, Cpu
 } from 'lucide-react';
 
-// --- PRODUCTION IMPORTS ---
+// ============================================================================
+// ⚠️ PRODUCTION IMPORTS (Uncomment these 2 lines in VS Code!) ⚠️
 // import { createClient } from '@supabase/supabase-js';
 // import * as XLSX from 'xlsx';
+// ============================================================================
 
-// --- LOCAL PREVIEW MOCKS ---
+// ============================================================================
+// ⚠️ LOCAL PREVIEW MOCKS (DELETE THIS ENTIRE BLOCK IN VS CODE!) ⚠️
 const createClient = () => ({
   from: () => ({
     select: () => ({ eq: () => ({ single: async () => ({ data: null, error: null }) }) }),
@@ -23,7 +26,8 @@ const createClient = () => ({
   channel: () => ({ on: () => ({ subscribe: () => ({}) }) }),
   removeChannel: () => {}
 });
-const XLSX = { read: () => ({}), utils: { sheet_to_json: () => [] } };
+const XLSX = { read: () => ({ SheetNames: [], Sheets: {} }), utils: { sheet_to_json: () => [] } };
+// ============================================================================
 
 // --- SUPABASE CONFIG ---
 const supabaseUrl = 'https://npfuxifktdmxmzprfcxm.supabase.co';
@@ -224,7 +228,7 @@ export default function App() {
     return insights;
   }, [fromDate, toDate, currentData]);
 
-  // Append Logic
+  // Robust Append Logic
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -237,18 +241,21 @@ export default function App() {
         const workbook = XLSX.read(bstr, { type: 'binary' });
         const newData = JSON.parse(JSON.stringify(dbData));
         
-        // Prepare the new daily record
+        // Prepare the new daily record defaults
         const newRecord = {
           date: uploadDate,
-          kpis: { total: 0, resolved: 98.0, time: 60, unsat: 3.0 }, // Defaults 
+          kpis: { total: 0, resolved: 98.0, time: 60, unsat: 3.0 },
           categories: { 'Cleanliness': 0, 'Bedroll': 0, 'Watering': 0, 'Maintenance': 0, 'Staff Behavior': 0 },
           trains: {}, shifts: {}, feedback: []
         };
 
-        const drmSheetName = workbook.SheetNames.find(name => name.toLowerCase().includes('drm'));
-        if (drmSheetName) {
-           const worksheet = workbook.Sheets[drmSheetName];
-           const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        // Safer sheet extraction (handles missing SheetNames or mismatched names like CSVs)
+        const sheetNames = workbook.SheetNames || [];
+        const targetSheetName = sheetNames.find(name => name.toLowerCase().includes('drm')) || sheetNames[0];
+
+        if (targetSheetName && workbook.Sheets) {
+           const worksheet = workbook.Sheets[targetSheetName];
+           const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) || [];
            
            // Extract KPIs dynamically
            const totalRow = jsonData.find(row => row && row[1] === 'Total');
@@ -269,19 +276,28 @@ export default function App() {
            newData.records.push(newRecord);
         }
         
+        // Try saving to Supabase
         const { error } = await supabase.from('railmadad_sync').update({ 
             json_data: newData, 
             last_updated: new Date().toISOString() 
         }).eq('id', 1);
           
         if (error) throw error;
-        showToast(`Success! Appended data for ${uploadDate}.`);
+
+        // Check if we are running the local mock VS actual library
+        if (sheetNames.length === 0) {
+           showToast(`Appended Mock Data for ${uploadDate}. (Uncomment real XLSX import in VS Code for real data)`);
+        } else {
+           showToast(`Success! Appended Excel data for ${uploadDate}.`);
+        }
+        
       } catch (err) {
-        showToast("Error parsing Excel. Ensure 'DRM Position' sheet exists.");
+        console.error(err);
+        showToast("Error parsing Excel. Please check the file format.");
       }
+      
       setIsUploading(false);
-      // Reset input so user can upload the same file again if needed
-      e.target.value = null; 
+      e.target.value = null; // Reset input 
     };
     reader.readAsBinaryString(file);
   };
