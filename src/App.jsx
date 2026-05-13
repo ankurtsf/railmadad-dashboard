@@ -6,37 +6,35 @@ import {
 import { 
   LayoutDashboard, TrainFront, Clock, MessageSquareWarning, 
   Sparkles, Menu, X, AlertTriangle, CheckCircle, Upload, 
-  Calendar, Trash2, Cpu, FileSpreadsheet, Bug, BarChart3, Map, Filter
+  Calendar, Trash2, Cpu, FileSpreadsheet, Bug, BarChart3, Map as MapIcon, Filter
 } from 'lucide-react';
 
 const COLORS = ['#3b82f6', '#8b5cf6', '#0ea5e9', '#f59e0b', '#ef4444', '#10b981', '#6366f1', '#f43f5e', '#a855f7', '#ec4899'];
 
-// Strictly empty initial state.
+// Initial empty state
 const initialRawDatabase = { records: [] };
 
 // --- STABLE RAW DATA PARSERS ---
 
-/**
- * Parses exact RailMadad Date Format: "22-05-25 22:51"
- */
 const parseRawDate = (raw) => {
     if (!raw) return null;
     const str = String(raw).trim();
     
-    // Ignore floating point reference numbers masquerading as strings
+    // Ignore long numeric strings like Reference Numbers
     if (/^\d+\.\d+$/.test(str) && str.length > 10) return null; 
 
-    // Handle Excel serial number conversion
+    // Handle Excel serial date numbers
     if (!isNaN(Number(raw)) && typeof raw === 'number' && raw > 40000 && raw < 70000) {
         const d = new Date(Math.round((raw - 25569) * 86400 * 1000));
+        const hour = d.getUTCHours();
         return {
             date: d.toISOString().split('T')[0],
             month: d.toISOString().substring(0, 7),
-            shift: getShift(d.getUTCHours())
+            shift: hour >= 8 && hour < 16 ? '08:00 - 16:00' : (hour >= 16 && hour < 24 ? '16:00 - 24:00' : '00:00 - 08:00')
         };
     }
 
-    // Match DD-MM-YY HH:MM format from raw CSV
+    // Match DD-MM-YY HH:MM or similar variations
     const match = str.match(/^(\d{1,4})[-/.](\d{1,2})[-/.](\d{1,4})(?:\s+(\d{1,2}):(\d{2}))?/);
     if (!match) return null;
 
@@ -53,22 +51,15 @@ const parseRawDate = (raw) => {
     let hour = 12;
     if (match[4]) hour = parseInt(match[4], 10);
 
+    const shift = hour >= 8 && hour < 16 ? '08:00 - 16:00' : (hour >= 16 && hour < 24 ? '16:00 - 24:00' : '00:00 - 08:00');
+
     return {
         date: `${year}-${month}-${day}`,
         month: `${year}-${month}`, 
-        shift: getShift(hour)
+        shift
     };
 };
 
-const getShift = (hour) => {
-    if (hour >= 8 && hour < 16) return '08:00 - 16:00';
-    if (hour >= 16 && hour < 24) return '16:00 - 24:00';
-    return '00:00 - 08:00';
-};
-
-/**
- * Converts "1:16" to total minutes (76)
- */
 const parseResolutionTime = (val) => {
     if (!val || String(val) === "null") return 0;
     const match = String(val).match(/(\d+):(\d+)/);
@@ -87,7 +78,7 @@ const navItemsList = [
   { id: 'overview', label: 'Overview & Analytics', icon: LayoutDashboard },
   { id: 'category', label: 'Category & Pest Control', icon: Sparkles },
   { id: 'trains', label: 'Train Analysis Matrix', icon: TrainFront },
-  { id: 'geo', label: 'Geo & Coach Types', icon: Map },
+  { id: 'geo', label: 'Geo & Coach Types', icon: MapIcon },
   { id: 'operations', label: 'Shifts & Feedback', icon: Clock },
 ];
 
@@ -130,7 +121,7 @@ export default function App() {
     setTimeout(() => setToastMessage(''), 6000);
   };
 
-  // 1. Inject Dependencies Dynamically
+  // Inject Dependencies
   useEffect(() => {
     const loadDependencies = async () => {
       try {
@@ -161,7 +152,7 @@ export default function App() {
     loadDependencies();
   }, []);
 
-  // 2. Fetch Data from Supabase
+  // Persistent fetch from Supabase
   const fetchCloudData = async () => {
     if (!supabaseClient) return;
     try {
@@ -170,7 +161,7 @@ export default function App() {
           if (error.code === 'PGRST116') {
               await supabaseClient.from('railmadad_sync').insert([{ id: 1, json_data: initialRawDatabase }]);
           }
-          setLastSync("Empty Storage");
+          setLastSync("Storage Ready");
           return;
       }
       if (data && data.json_data && data.json_data.records) {
@@ -185,7 +176,7 @@ export default function App() {
       }
     } catch (err) { 
       console.error("Cloud fetch failed", err); 
-      setLastSync("Cloud error");
+      setLastSync("Cloud Offline");
     }
   };
 
@@ -193,14 +184,8 @@ export default function App() {
     fetchCloudData();
   }, [supabaseClient]);
 
-  // --- CORE RAW DATA AGGREGATOR ---
-  const { 
-    kpis, momData, catMomData, monthsSorted, trainData, 
-    uniqueCats, feedbackData, unsatTable, pestTable, shiftData,
-    zoneData, coachData, statusData, availableZones, availableStatuses
-  } = useMemo(() => {
-    
-    // Apply Global Filters
+  // --- CORE ANALYTICS ENGINE ---
+  const aggregated = useMemo(() => {
     const validRecords = (dbData.records || []).filter(r => {
         if (r.date < fromDate || r.date > toDate) return false;
         if (selectedZone !== 'All' && r.zone !== selectedZone) return false;
@@ -208,7 +193,6 @@ export default function App() {
         return true;
     });
     
-    // Build Available Filters
     const zoneSet = new Set();
     const statusSet = new Set();
     (dbData.records || []).forEach(r => {
@@ -241,7 +225,7 @@ export default function App() {
             recordsWithResTime++;
         }
 
-        let stat = String(r.status || 'Pending').trim();
+        const stat = String(r.status || 'Pending').trim();
         statusMap[stat] = (statusMap[stat] || 0) + 1;
 
         if (r.zone && r.zone !== 'Unknown') zoneMap[r.zone] = (zoneMap[r.zone] || 0) + 1;
@@ -273,33 +257,32 @@ export default function App() {
        avgResTime: recordsWithResTime > 0 ? formatMinutesToTime(totalResTime / recordsWithResTime) : "N/A",
     };
 
-    const statusData = Object.entries(statusMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
-    const zoneData = Object.entries(zoneMap).map(([zone, count]) => ({ zone, count })).sort((a,b) => b.count - a.count);
-    const coachData = Object.entries(coachMap).map(([coachType, count]) => ({ coachType, count })).sort((a,b) => b.count - a.count);
-    const momData = Object.entries(momMap).map(([month, count]) => ({ month, count })).sort((a,b) => a.month.localeCompare(b.month));
-    const monthsSorted = Array.from(mSet).sort();
-    const catMomData = Object.entries(catMomMap).map(([category, counts]) => ({ category, ...counts })).sort((a,b) => b.Total - a.Total);
-    const trainData = Object.values(trainMap).sort((a,b) => b.Total - a.Total);
-    const uniqueCats = Array.from(catSet).sort();
-    const feedbackData = Object.entries(feedbackMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
-
-    const unsatTable = validRecords.filter(r => (r.rating||'').toLowerCase().includes('unsatisfactory'));
-    const pestTable = validRecords.filter(r => r.isPest);
-    const shiftData = Object.entries(shiftMap).map(([shift, complaints]) => ({ shift, complaints }));
-
     return { 
-        kpis, momData, catMomData, monthsSorted, trainData, uniqueCats, 
-        feedbackData, unsatTable, pestTable, shiftData, zoneData, coachData, statusData,
+        kpis, 
+        momData: Object.entries(momMap).map(([month, count]) => ({ month, count })).sort((a,b) => a.month.localeCompare(b.month)),
+        catMomData: Object.entries(catMomMap).map(([category, counts]) => ({ category, ...counts })).sort((a,b) => b.Total - a.Total),
+        monthsSorted: Array.from(mSet).sort(),
+        trainData: Object.values(trainMap).sort((a,b) => b.Total - a.Total),
+        uniqueCats: Array.from(catSet).sort(),
+        feedbackData: Object.entries(feedbackMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value),
+        unsatTable: validRecords.filter(r => (r.rating||'').toLowerCase().includes('unsatisfactory')),
+        pestTable: validRecords.filter(r => r.isPest),
+        shiftData: Object.entries(shiftMap).map(([shift, complaints]) => ({ shift, complaints })),
+        zoneData: Object.entries(zoneMap).map(([zone, count]) => ({ zone, count })).sort((a,b) => b.count - a.count),
+        coachData: Object.entries(coachMap).map(([coachType, count]) => ({ coachType, count })).sort((a,b) => b.count - a.count),
+        statusData: Object.entries(statusMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value),
         availableZones: Array.from(zoneSet).sort(),
         availableStatuses: Array.from(statusSet).sort()
     };
   }, [dbData, fromDate, toDate, selectedZone, selectedStatus]);
 
-  // --- ROBUST FILE PARSER ---
+  const { kpis, momData, catMomData, monthsSorted, trainData, uniqueCats, feedbackData, unsatTable, pestTable, shiftData, zoneData, coachData, statusData, availableZones, availableStatuses } = aggregated;
+
+  // --- STABLE FILE PARSER ---
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file || !window.XLSX || !supabaseClient) {
-        showToast("Systems are still initializing. Please wait a second.");
+        showToast("Systems are still initializing. Please wait.");
         return;
     }
 
@@ -311,13 +294,10 @@ export default function App() {
         const buffer = evt.target.result;
         const workbook = window.XLSX.read(buffer, { type: 'array' });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        
-        // Read as matrix to ensure header keys don't get misidentified
         const rawArray = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
         
-        if (!rawArray || rawArray.length === 0) throw new Error("File is empty.");
+        if (!rawArray || rawArray.length === 0) throw new Error("Empty file.");
 
-        // Dynamic header detection (scans up to 100 rows)
         let headerRowIdx = -1;
         let colMap = {};
         const keyHeaders = ['complaintrefno', 'refno', 'createdon', 'comptypename', 'trainstation'];
@@ -325,25 +305,18 @@ export default function App() {
         for (let i = 0; i < Math.min(100, rawArray.length); i++) {
             const row = rawArray[i];
             if (!row || !Array.isArray(row)) continue;
-            
-            // Aggressive normalization of header strings
             const cleanRow = row.map(c => String(c || "").toLowerCase().replace(/[^a-z0-9]/g, '').trim());
-            
             const matchCount = keyHeaders.filter(kh => cleanRow.includes(kh)).length;
             if (matchCount >= 2) {
                 headerRowIdx = i;
-                cleanRow.forEach((val, colIdx) => {
-                    if (val) colMap[val] = colIdx;
-                });
+                cleanRow.forEach((val, colIdx) => { if (val) colMap[val] = colIdx; });
                 break;
             }
         }
 
         if (headerRowIdx === -1) {
-            showToast("⚠️ Standard headers not found. Check if this is the Raw Data file.");
-            setIsUploading(false);
-            e.target.value = null; 
-            return;
+            showToast("Standard headers not found. Check if this is a Raw Data file.");
+            setIsUploading(false); e.target.value = null; return;
         }
 
         const getValue = (row, key) => {
@@ -351,7 +324,7 @@ export default function App() {
             return (idx !== undefined && row[idx] !== undefined) ? row[idx] : null;
         };
 
-        const existingMap = new Map();
+        const existingMap = new window.Map(); // Use window.Map explicitly to avoid shadowing conflict
         const baseRecords = dbData.records || [];
         baseRecords.forEach(r => existingMap.set(String(r.id), r));
 
@@ -361,7 +334,6 @@ export default function App() {
             const row = rawArray[i];
             if (!row || row.length === 0) continue;
 
-            // Individual row safety wrapper
             try {
                 const refNo = getValue(row, 'complaintrefno') || getValue(row, 'refno');
                 const createdOn = getValue(row, 'createdon');
@@ -387,7 +359,7 @@ export default function App() {
                 const matchTrain = rawTrain.match(/\b\d{4,5}\b/);
                 const trainNo = matchTrain ? matchTrain[0] : (trainStation ? String(trainStation) : 'Unknown');
 
-                const newRecord = {
+                existingMap.set(recordId, {
                     id: recordId,
                     date: parsedObj.date,
                     month: parsedObj.month,
@@ -402,51 +374,27 @@ export default function App() {
                     coachType: String(getValue(row, 'coachtype') || 'Unknown').trim(),
                     resTimeMins: parseResolutionTime(getValue(row, 'diff') || getValue(row, 'avgcdiff')),
                     desc: String(rawDesc).substring(0, 200),
-                };
-
-                existingMap.set(newRecord.id, newRecord);
+                });
                 newRecordsAdded++;
-            } catch (rowErr) {
-                console.warn(`Skipping malformed row at index ${i}`, rowErr);
-            }
+            } catch (rowErr) { console.warn("Row failed", rowErr); }
         }
 
         if (newRecordsAdded > 0) {
             const newData = { records: Array.from(existingMap.values()) };
-
             setDbData(newData);
             setLastSync(new Date().toLocaleTimeString());
-            
             const sortedDates = [...newData.records].map(r => r.date).sort();
-            setFromDate(sortedDates[0]);
-            setToDate(sortedDates[sortedDates.length - 1]);
-
-            showToast(`✅ Added ${newRecordsAdded} new records.`);
-
-            // Persistent Cloud Sync
-            const { error } = await supabaseClient.from('railmadad_sync').upsert({ 
-                id: 1,
-                json_data: newData, 
-                last_updated: new Date().toISOString() 
-            }, { onConflict: 'id' });
-
-            if (error) {
-                console.error("Cloud Save failed", error);
-                showToast("⚠️ Cloud Sync failed. Data saved locally only.");
-            }
+            setFromDate(sortedDates[0]); setToDate(sortedDates[sortedDates.length - 1]);
+            showToast(`Added ${newRecordsAdded} records.`);
+            await supabaseClient.from('railmadad_sync').upsert({ id: 1, json_data: newData, last_updated: new Date().toISOString() });
         } else {
-            showToast("No new records were added (Duplicate file).");
+            showToast("No new records detected.");
         }
       } catch (err) {
-        console.error("Critical Parse Error:", err);
-        showToast("❌ Error processing file. Please ensure it's a Raw RailMadad CSV.");
+        console.error("Parse Error:", err);
+        showToast("Error processing file format.");
       }
-      setIsUploading(false);
-      e.target.value = null; 
-    };
-    reader.onerror = () => {
-        showToast("❌ Error reading file buffer.");
-        setIsUploading(false);
+      setIsUploading(false); e.target.value = null; 
     };
     reader.readAsArrayBuffer(file);
   };
@@ -455,18 +403,13 @@ export default function App() {
     if (!supabaseClient) return;
     setShowResetModal(false);
     showToast("Wiping database...");
-    
     setDbData(initialRawDatabase); 
-    const today = new Date().toISOString().split('T')[0];
-    setFromDate(today); setToDate(today);
+    setFromDate(lastMonthStr); setToDate(todayStr);
     setSelectedZone('All'); setSelectedStatus('All');
-
     try {
       await supabaseClient.from('railmadad_sync').upsert({ id: 1, json_data: initialRawDatabase, last_updated: new Date().toISOString() });
-      showToast("✅ Database wiped clean.");
-    } catch (err) {
-      showToast("⚠️ Cloud reset failed.");
-    }
+      showToast("Database wiped clean.");
+    } catch (err) { showToast("Cloud reset failed."); }
   };
 
   return (
@@ -485,9 +428,7 @@ export default function App() {
               <AlertTriangle className="w-6 h-6" />
             </div>
             <h3 className="text-xl font-bold text-slate-800 mb-2">Wipe Database?</h3>
-            <p className="text-sm text-slate-500 mb-6 leading-relaxed">
-              This will permanently delete all raw data.
-            </p>
+            <p className="text-sm text-slate-500 mb-6 leading-relaxed">This will permanently delete all raw data locally and in the cloud.</p>
             <div className="flex space-x-3">
               <button onClick={() => setShowResetModal(false)} className="flex-1 py-2.5 rounded-lg border border-slate-200 text-slate-600 font-semibold text-sm hover:bg-slate-50 transition-colors">Cancel</button>
               <button onClick={executeHardReset} className="flex-1 py-2.5 rounded-lg bg-rose-600 text-white font-semibold text-sm hover:bg-rose-700 transition-colors shadow-sm shadow-rose-200">Yes, Wipe Data</button>
@@ -548,7 +489,6 @@ export default function App() {
       </aside>
 
       <main className="flex-1 flex flex-col max-w-full overflow-hidden bg-slate-50">
-        
         <header className="md:hidden bg-indigo-700 text-white p-4 flex justify-between items-center sticky top-0 z-30 shadow-md">
           <h1 className="text-lg font-bold flex items-center"><TrainFront className="w-5 h-5 mr-2"/> RailMadad</h1>
           <button onClick={() => setIsMobileMenuOpen(true)}><Menu className="w-6 h-6" /></button>
@@ -556,7 +496,6 @@ export default function App() {
 
         <div className="bg-white border-b border-slate-200 px-4 md:px-8 py-4 flex flex-col lg:flex-row justify-between items-start lg:items-center space-y-4 lg:space-y-0 z-20 sticky top-0 md:top-0 shadow-sm">
            <h2 className="text-xl font-black text-slate-800 tracking-tight">{String(navItemsList.find(i => i.id === activeTab)?.label)}</h2>
-           
            <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-3 sm:space-y-0 sm:space-x-4 bg-slate-50 border border-slate-200 p-2 rounded-xl flex-wrap">
               <div className="flex items-center text-sm">
                  <Filter className="w-4 h-4 text-indigo-500 mr-2 shrink-0" />
@@ -585,14 +524,11 @@ export default function App() {
         </div>
 
         <div className="p-4 md:p-8 flex-1 overflow-y-auto space-y-8">
-
-          {(dbData.records || []).length === 0 ? (
+          {dbData.records.length === 0 ? (
              <div className="bg-white p-16 mt-10 rounded-3xl border border-slate-200 flex flex-col items-center justify-center text-center max-w-2xl mx-auto shadow-sm">
                <div className="w-24 h-24 bg-indigo-50 rounded-full flex items-center justify-center mb-6"><FileSpreadsheet className="w-12 h-12 text-indigo-400" /></div>
                <h3 className="text-3xl font-black text-slate-800 tracking-tight">Dashboard Empty</h3>
-               <p className="text-slate-500 mt-4 max-w-md leading-relaxed font-medium">
-                 Append your RailMadad Raw CSV export to see real-time analytics.
-               </p>
+               <p className="text-slate-500 mt-4 max-w-md leading-relaxed font-medium">Append your RailMadad Raw CSV export to see real-time analytics.</p>
              </div>
           ) : !kpis || kpis.total === 0 ? (
              <div className="bg-white p-12 mt-10 rounded-2xl border border-slate-200 flex flex-col items-center justify-center text-center max-w-2xl mx-auto shadow-sm">
@@ -602,7 +538,6 @@ export default function App() {
              </div>
           ) : (
             <>
-              {/* TAB 1: OVERVIEW */}
               {activeTab === 'overview' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -611,260 +546,84 @@ export default function App() {
                     <MetricCard title="Unsatisfactory Rate" value={`${String(kpis.unsat)}%`} icon={AlertTriangle} colorClass="bg-rose-600 text-white" />
                     <MetricCard title="Resolution Rate" value={`${String(kpis.resolved)}%`} icon={CheckCircle} colorClass="bg-indigo-600 text-white" />
                   </div>
-
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                      <div className="flex items-center justify-between mb-6">
-                         <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">MoM Volume Trend</h3>
-                         <BarChart3 className="text-slate-300 w-5 h-5"/>
-                      </div>
-                      <div className="h-80">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={momData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                            <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dy={10} />
-                            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
-                            <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
-                            <Bar dataKey="count" name="Total Complaints" fill="#3b82f6" radius={[6, 6, 0, 0]} barSize={50} />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
+                      <div className="flex items-center justify-between mb-6"><h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">MoM Volume Trend</h3><BarChart3 className="text-slate-300 w-5 h-5"/></div>
+                      <div className="h-80"><ResponsiveContainer width="100%" height="100%"><BarChart data={momData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" /><XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dy={10} /><YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} /><Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} /><Bar dataKey="count" name="Total Complaints" fill="#3b82f6" radius={[6, 6, 0, 0]} barSize={50} /></BarChart></ResponsiveContainer></div>
                     </div>
-
                     <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                        <div className="flex items-center justify-between mb-6">
-                           <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Status Distribution</h3>
-                           <CheckCircle className="text-slate-300 w-5 h-5"/>
-                        </div>
-                        <div className="h-80">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                              <Pie data={statusData} cx="50%" cy="50%" innerRadius={80} outerRadius={120} paddingAngle={4} dataKey="value">
-                                {statusData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
-                              </Pie>
-                              <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
-                              <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                            </PieChart>
-                          </ResponsiveContainer>
-                        </div>
+                        <div className="flex items-center justify-between mb-6"><h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Status Distribution</h3><CheckCircle className="text-slate-300 w-5 h-5"/></div>
+                        <div className="h-80"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={statusData} cx="50%" cy="50%" innerRadius={80} outerRadius={120} paddingAngle={4} dataKey="value">{statusData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}</Pie><Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} /><Legend verticalAlign="bottom" height={36} iconType="circle" /></PieChart></ResponsiveContainer></div>
                     </div>
                   </div>
                 </div>
               )}
-
-              {/* TAB 2: CATEGORY & PEST CONTROL */}
               {activeTab === 'category' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                  <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden h-fit">
                     <div className="px-6 py-5 border-b border-slate-100 bg-slate-50"><h3 className="text-base font-bold text-slate-800">Category Wise MoM Summary</h3></div>
                     <div className="overflow-x-auto max-h-[500px]">
                       <table className="min-w-full text-left border-collapse">
-                        <thead className="sticky top-0 bg-slate-100 z-10 shadow-sm">
-                          <tr className="text-slate-500 text-[10px] uppercase tracking-widest">
-                            <th className="p-4 font-bold border-b border-slate-200">Category</th>
-                            {monthsSorted.map(m => <th key={String(m)} className="p-4 font-bold border-b border-slate-200">{String(m)}</th>)}
-                            <th className="p-4 font-black border-b border-slate-200 text-slate-800">Total</th>
-                          </tr>
-                        </thead>
-                        <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
-                          {catMomData.map((row, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                              <td className="p-4 font-bold text-slate-900 flex items-center"><Sparkles className="w-4 h-4 mr-2 text-indigo-400" />{String(row.category)}</td>
-                              {monthsSorted.map(m => <td key={String(m)} className="p-4 font-medium text-slate-600">{String(row[m] || '-')}</td>)}
-                              <td className="p-4 font-black text-indigo-600">{String(row.Total)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
+                        <thead className="sticky top-0 bg-slate-100 z-10 shadow-sm"><tr className="text-slate-500 text-[10px] uppercase tracking-widest"><th className="p-4 font-bold border-b border-slate-200">Category</th>{monthsSorted.map(m => <th key={String(m)} className="p-4 font-bold border-b border-slate-200">{String(m)}</th>)}<th className="p-4 font-black border-b border-slate-200 text-slate-800">Total</th></tr></thead>
+                        <tbody className="text-sm text-slate-700 divide-y divide-slate-100">{catMomData.map((row, idx) => (<tr key={idx} className="hover:bg-slate-50 transition-colors"><td className="p-4 font-bold text-slate-900 flex items-center"><Sparkles className="w-4 h-4 mr-2 text-indigo-400" />{String(row.category)}</td>{monthsSorted.map(m => <td key={String(m)} className="p-4 font-medium text-slate-600">{String(row[m] || '-')}</td>)}<td className="p-4 font-black text-indigo-600">{String(row.Total)}</td></tr>))}</tbody>
                       </table>
                     </div>
                   </div>
-
-                  <div className="bg-white rounded-2xl border border-rose-100 shadow-sm overflow-hidden">
-                    <div className="px-6 py-5 border-b border-rose-100 bg-rose-50 flex items-center">
-                       <Bug className="w-5 h-5 text-rose-600 mr-2" />
-                       <h3 className="text-base font-bold text-rose-900">Pest Control & Rodent Target List</h3>
-                    </div>
-                    {pestTable.length === 0 ? (
-                      <div className="p-8 text-center text-slate-500 font-medium">No Pest Control complaints identified via description keywords.</div>
-                    ) : (
+                  <div className="bg-white rounded-2xl border border-rose-100 shadow-sm overflow-hidden h-fit">
+                    <div className="px-6 py-5 border-b border-rose-100 bg-rose-50 flex items-center"><Bug className="w-5 h-5 text-rose-600 mr-2" /><h3 className="text-base font-bold text-rose-900">Pest Control & Rodent Target List</h3></div>
+                    {pestTable.length === 0 ? (<div className="p-8 text-center text-slate-500 font-medium">No records found.</div>) : (
                       <div className="overflow-x-auto max-h-96">
-                        <table className="min-w-full text-left border-collapse">
-                          <thead className="sticky top-0 bg-white shadow-sm z-10">
-                            <tr className="text-slate-400 text-[10px] uppercase tracking-widest border-b border-slate-100">
-                              <th className="p-4 font-bold">Ref No</th>
-                              <th className="p-4 font-bold">Date</th>
-                              <th className="p-4 font-bold">Train</th>
-                              <th className="p-4 font-bold">Details</th>
-                            </tr>
-                          </thead>
-                          <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
-                            {pestTable.map((row, idx) => (
-                              <tr key={idx} className="hover:bg-rose-50/50">
-                                <td className="p-4 font-mono text-[10px] text-slate-400">{String(row.id)}</td>
-                                <td className="p-4 font-medium whitespace-nowrap">{String(row.date)}</td>
-                                <td className="p-4 font-bold text-rose-700">{String(row.train)}</td>
-                                <td className="p-4 text-slate-600 max-w-md">
-                                  <span className="font-semibold text-slate-800">{String(row.subType || "Unclassified")}</span> <br/>
-                                  <span className="text-xs">{String(row.desc)}</span>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
+                        <table className="min-w-full text-left border-collapse"><thead className="sticky top-0 bg-white shadow-sm z-10"><tr className="text-slate-400 text-[10px] uppercase tracking-widest border-b border-slate-100"><th className="p-4 font-bold">Ref No</th><th className="p-4 font-bold">Date</th><th className="p-4 font-bold">Train</th><th className="p-4 font-bold">Details</th></tr></thead>
+                          <tbody className="text-sm text-slate-700 divide-y divide-slate-100">{pestTable.map((row, idx) => (<tr key={idx} className="hover:bg-rose-50/50"><td className="p-4 font-mono text-[10px] text-slate-400">{String(row.id)}</td><td className="p-4 font-medium whitespace-nowrap">{String(row.date)}</td><td className="p-4 font-bold text-rose-700">{String(row.train)}</td><td className="p-4 text-slate-600 max-w-md"><span className="font-semibold text-slate-800">{String(row.subType || "Unclassified")}</span> <br/><span className="text-xs">{String(row.desc)}</span></td></tr>))}</tbody>
                         </table>
                       </div>
                     )}
                   </div>
                 </div>
               )}
-
-              {/* TAB 3: TRAIN ANALYSIS */}
               {activeTab === 'trains' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                  <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm h-fit">
                     <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Top 15 Affected Trains</h3>
-                    <div className="h-[400px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={trainData.slice(0, 15)} layout="vertical" margin={{ left: 60, right: 20 }}>
-                          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
-                          <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
-                          <YAxis dataKey="train" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#334155', fontWeight: 600 }} dx={-10} />
-                          <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
-                          <Bar dataKey="Total" name="Total Cases" fill="#8b5cf6" radius={[0, 6, 6, 0]} barSize={20} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
+                    <div className="h-[400px]"><ResponsiveContainer width="100%" height="100%"><BarChart data={trainData.slice(0, 15)} layout="vertical" margin={{ left: 60, right: 20 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" /><XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} /><YAxis dataKey="train" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#334155', fontWeight: 600 }} dx={-10} /><Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} /><Bar dataKey="Total" name="Total Cases" fill="#8b5cf6" radius={[0, 6, 6, 0]} barSize={20} /></BarChart></ResponsiveContainer></div>
                   </div>
-
-                  <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                  <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden h-fit">
                     <div className="px-6 py-5 border-b border-slate-100 bg-slate-50"><h3 className="text-base font-bold text-slate-800">Train vs. Category Matrix</h3></div>
                     <div className="overflow-x-auto max-h-[600px]">
-                      <table className="min-w-full text-left border-collapse">
-                        <thead className="sticky top-0 bg-slate-100 z-10 shadow-sm">
-                          <tr className="text-slate-500 text-[10px] uppercase tracking-widest">
-                            <th className="p-4 font-bold border-b border-slate-200">Train</th>
-                            {uniqueCats.map(c => <th key={String(c)} className="p-4 font-bold border-b border-slate-200 whitespace-nowrap">{String(c)}</th>)}
-                            <th className="p-4 font-black border-b border-slate-200 text-slate-800">Total</th>
-                          </tr>
-                        </thead>
-                        <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
-                          {trainData.map((row, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                              <td className="p-4 font-bold flex items-center text-slate-900 whitespace-nowrap"><TrainFront className="w-4 h-4 mr-2 text-indigo-400" />{String(row.train)}</td>
-                              {uniqueCats.map(c => <td key={String(c)} className="p-4 font-medium text-slate-600">{String(row[c] || '-')}</td>)}
-                              <td className="p-4 font-black text-indigo-600">{String(row.Total)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
+                      <table className="min-w-full text-left border-collapse"><thead className="sticky top-0 bg-slate-100 z-10 shadow-sm"><tr className="text-slate-500 text-[10px] uppercase tracking-widest"><th className="p-4 font-bold border-b border-slate-200">Train</th>{uniqueCats.map(c => <th key={String(c)} className="p-4 font-bold border-b border-slate-200 whitespace-nowrap">{String(c)}</th>)}<th className="p-4 font-black border-b border-slate-200 text-slate-800">Total</th></tr></thead>
+                        <tbody className="text-sm text-slate-700 divide-y divide-slate-100">{trainData.map((row, idx) => (<tr key={idx} className="hover:bg-slate-50 transition-colors"><td className="p-4 font-bold flex items-center text-slate-900 whitespace-nowrap"><TrainFront className="w-4 h-4 mr-2 text-indigo-400" />{String(row.train)}</td>{uniqueCats.map(c => <td key={String(c)} className="p-4 font-medium text-slate-600">{String(row[c] || '-')}</td>)}<td className="p-4 font-black text-indigo-600">{String(row.Total)}</td></tr>))}</tbody>
                       </table>
                     </div>
                   </div>
                 </div>
               )}
-
-              {/* TAB 4: GEO & COACH */}
               {activeTab === 'geo' && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm h-fit">
                     <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Zone Breakdown</h3>
-                    <div className="h-[400px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={zoneData} layout="vertical" margin={{ left: 20, right: 20 }}>
-                          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
-                          <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
-                          <YAxis dataKey="zone" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#334155', fontWeight: 600 }} />
-                          <Tooltip cursor={{ fill: '#f8fafc' }} />
-                          <Bar dataKey="count" name="Cases" fill="#f59e0b" radius={[0, 6, 6, 0]} barSize={20} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
+                    <div className="h-[400px]"><ResponsiveContainer width="100%" height="100%"><BarChart data={zoneData} layout="vertical" margin={{ left: 20, right: 20 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" /><XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} /><YAxis dataKey="zone" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#334155', fontWeight: 600 }} /><Tooltip cursor={{ fill: '#f8fafc' }} /><Bar dataKey="count" name="Cases" fill="#f59e0b" radius={[0, 6, 6, 0]} barSize={20} /></BarChart></ResponsiveContainer></div>
                   </div>
-
                   <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm h-fit">
                     <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Coach Type Distribution</h3>
-                    <div className="h-[400px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={coachData} layout="vertical" margin={{ left: 20, right: 20 }}>
-                          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
-                          <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
-                          <YAxis dataKey="coachType" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#334155', fontWeight: 600 }} />
-                          <Tooltip cursor={{ fill: '#f8fafc' }} />
-                          <Bar dataKey="count" name="Cases" fill="#10b981" radius={[0, 6, 6, 0]} barSize={20} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
+                    <div className="h-[400px]"><ResponsiveContainer width="100%" height="100%"><BarChart data={coachData} layout="vertical" margin={{ left: 20, right: 20 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" /><XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} /><YAxis dataKey="coachType" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#334155', fontWeight: 600 }} /><Tooltip cursor={{ fill: '#f8fafc' }} /><Bar dataKey="count" name="Cases" fill="#10b981" radius={[0, 6, 6, 0]} barSize={20} /></BarChart></ResponsiveContainer></div>
                   </div>
                 </div>
               )}
-
-              {/* TAB 5: SHIFTS & FEEDBACK */}
               {activeTab === 'operations' && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden h-fit">
                     <div className="px-6 py-5 border-b border-slate-100 bg-slate-50"><h3 className="text-base font-bold text-slate-800">Shift Volume</h3></div>
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full text-left border-collapse">
-                        <thead>
-                          <tr className="bg-white text-slate-400 text-[10px] uppercase tracking-widest border-b border-slate-100">
-                            <th className="p-4 font-bold">Shift Bracket</th>
-                            <th className="p-4 font-bold">Volume</th>
-                          </tr>
-                        </thead>
-                        <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
-                          {shiftData.map((row, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50">
-                              <td className="p-4 font-bold text-slate-800 flex items-center"><Clock className="w-4 h-4 mr-2 text-slate-400"/>{String(row.shift)}</td>
-                              <td className="p-4 font-black text-indigo-600">{String(row.complaints)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    <div className="overflow-x-auto"><table className="min-w-full text-left border-collapse"><thead><tr className="bg-white text-slate-400 text-[10px] uppercase tracking-widest border-b border-slate-100"><th className="p-4 font-bold">Shift Bracket</th><th className="p-4 font-bold">Volume</th></tr></thead><tbody className="text-sm text-slate-700 divide-y divide-slate-100">{shiftData.map((row, idx) => (<tr key={idx} className="hover:bg-slate-50"><td className="p-4 font-bold text-slate-800 flex items-center"><Clock className="w-4 h-4 mr-2 text-slate-400"/>{String(row.shift)}</td><td className="p-4 font-black text-indigo-600">{String(row.complaints)}</td></tr>))}</tbody></table></div>
                   </div>
-
-                  <div className="space-y-8">
+                  <div className="space-y-8 h-fit">
                     <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
                         <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Feedback Type</h3>
-                        <div className="h-64">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                              <Pie data={feedbackData} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={4} dataKey="value">
-                                {feedbackData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
-                              </Pie>
-                              <Tooltip />
-                              <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                            </PieChart>
-                          </ResponsiveContainer>
-                        </div>
+                        <div className="h-64"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={feedbackData} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={4} dataKey="value">{feedbackData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}</Pie><Tooltip /><Legend verticalAlign="bottom" height={36} iconType="circle" /></PieChart></ResponsiveContainer></div>
                     </div>
-
                     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-                       <div className="px-6 py-5 border-b border-slate-100 bg-rose-50 flex items-center">
-                           <MessageSquareWarning className="w-5 h-5 text-rose-600 mr-2" />
-                           <h3 className="text-base font-bold text-rose-900">Highest Feedback: Unsatisfactory Cases</h3>
-                       </div>
-                       {unsatTable.length === 0 ? (
-                         <div className="p-8 text-center text-slate-500 font-medium">No results found.</div>
-                       ) : (
-                         <div className="overflow-x-auto max-h-96">
-                           <table className="min-w-full text-left border-collapse">
-                             <thead className="sticky top-0 bg-white shadow-sm z-10">
-                               <tr className="text-slate-400 text-[10px] uppercase tracking-widest border-b border-slate-100">
-                                 <th className="p-4 font-bold">Ref No.</th>
-                                 <th className="p-4 font-bold">Train</th>
-                                 <th className="p-4 font-bold">Desc</th>
-                               </tr>
-                             </thead>
-                             <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
-                               {unsatTable.map((row, idx) => (
-                                 <tr key={idx} className="hover:bg-slate-50">
-                                   <td className="p-4 font-mono text-[10px] text-slate-400 whitespace-nowrap">{String(row.id)}</td>
-                                   <td className="p-4 font-bold text-slate-800">{String(row.train)}</td>
-                                   <td className="p-4 text-xs text-slate-600 max-w-md">{String(row.desc)}</td>
-                                 </tr>
-                               ))}
-                             </tbody>
-                           </table>
-                         </div>
+                       <div className="px-6 py-5 border-b border-slate-100 bg-rose-50 flex items-center"><MessageSquareWarning className="w-5 h-5 text-rose-600 mr-2" /><h3 className="text-base font-bold text-rose-900">Unsatisfactory Feedback Cases</h3></div>
+                       {unsatTable.length === 0 ? (<div className="p-8 text-center text-slate-500 font-medium">No results found.</div>) : (
+                         <div className="overflow-x-auto max-h-96"><table className="min-w-full text-left border-collapse"><thead className="sticky top-0 bg-white shadow-sm z-10"><tr className="text-slate-400 text-[10px] uppercase tracking-widest border-b border-slate-100"><th className="p-4 font-bold">Ref No.</th><th className="p-4 font-bold">Train</th><th className="p-4 font-bold">Desc</th></tr></thead><tbody className="text-sm text-slate-700 divide-y divide-slate-100">{unsatTable.map((row, idx) => (<tr key={idx} className="hover:bg-slate-50"><td className="p-4 font-mono text-[10px] text-slate-400 whitespace-nowrap">{String(row.id)}</td><td className="p-4 font-bold text-slate-800">{String(row.train)}</td><td className="p-4 text-xs text-slate-600 max-w-md">{String(row.desc)}</td></tr>))}</tbody></table></div>
                        )}
                     </div>
                   </div>
