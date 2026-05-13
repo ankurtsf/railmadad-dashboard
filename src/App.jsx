@@ -16,19 +16,6 @@ import {
 // import * as XLSX from 'xlsx';
 // ============================================================================
 
-// ============================================================================
-// ⚠️ LOCAL PREVIEW MOCKS (DELETE THIS ENTIRE BLOCK IN VS CODE!) ⚠️
-const createClient = () => ({
-  from: () => ({
-    select: () => ({ eq: () => ({ single: async () => ({ data: null, error: null }) }) }),
-    update: () => ({ eq: async () => ({ error: null }) })
-  }),
-  channel: () => ({ on: () => ({ subscribe: () => ({}) }) }),
-  removeChannel: () => {}
-});
-const XLSX = { read: () => ({ SheetNames: [], Sheets: {} }), utils: { sheet_to_json: () => [] } };
-// ============================================================================
-
 // --- SUPABASE CONFIG ---
 const supabaseUrl = 'https://npfuxifktdmxmzprfcxm.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZnV4aWZrdGRteG16cHJmY3htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2MjMwMDMsImV4cCI6MjA5NDE5OTAwM30.cCheIUxTAQWyoVyIwOLRd5usiyFI-q2GIn3A9NPFL78';
