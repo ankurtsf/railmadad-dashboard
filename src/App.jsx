@@ -21,6 +21,7 @@ const parseRawDate = (raw) => {
     if (!raw) return null;
     const str = String(raw).trim();
     
+    // Ignore pure floats (PNRs / Reference Numbers)
     if (/^\d+\.\d+$/.test(str)) return null; 
 
     // Excel serial number conversion
@@ -94,7 +95,7 @@ export default function App() {
     setTimeout(() => setToastMessage(''), 5000);
   };
 
-  // 1. Initialize Supabase & XLSX Dynamically
+  // 1. Initialize Supabase & XLSX Dynamically from CDNs
   useEffect(() => {
     const initDependencies = async () => {
       if (!window.XLSX) {
@@ -221,7 +222,7 @@ export default function App() {
     return { kpis, momData, catMomData, monthsSorted, trainData, uniqueCats, feedbackData, unsatTable, pestTable, shiftData };
   }, [dbData, fromDate, toDate]);
 
-  // --- RAW DATA EXCEL/CSV PARSER ---
+  // --- STRICT & AGGRESSIVE RAW DATA PARSER ---
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file || !window.XLSX || !supabaseClient) {
@@ -241,14 +242,21 @@ export default function App() {
         
         if (rawArray.length === 0) throw new Error("The uploaded sheet is empty.");
 
-        // Identify EXACT Raw Data Headers (Resilient to empty rows at top)
+        // Identify EXACT Raw Data Headers via aggressive alphanumeric normalization
+        // This neutralizes BOMs (\ufeff), trailing spaces, and capitalization issues
         let headerRowIdx = -1;
         let headers = [];
+        
         for (let i = 0; i < Math.min(20, rawArray.length); i++) {
             const row = rawArray[i];
-            if (row.some(c => String(c).toLowerCase().trim() === 'complaintrefno' || String(c).toLowerCase().trim() === 'createdon')) {
+            if (!row || !Array.isArray(row)) continue;
+            
+            // Convert array of cells to alphanumeric lowercase strings only
+            const cleanRow = row.map(c => String(c).toLowerCase().replace(/[^a-z0-9]/g, ''));
+            
+            if (cleanRow.includes('complaintrefno') || cleanRow.includes('createdon')) {
                 headerRowIdx = i;
-                headers = row.map(c => String(c).toLowerCase().trim());
+                headers = cleanRow; // Store the normalized headers
                 break;
             }
         }
@@ -295,12 +303,18 @@ export default function App() {
             const parsedObj = parseRawDate(createdOn);
             if (!parsedObj) continue;
 
-            // Raw Type & Pest Control Check
-            const rawCat = catIdx !== -1 && row[catIdx] ? String(row[catIdx]).trim() : 'Unknown';
+            // Raw Type & Exact Category Mapping
+            const rawCat = catIdx !== -1 && row[catIdx] ? String(row[catIdx]).trim() : 'Uncategorized';
             const rawSubCat = subCatIdx !== -1 && row[subCatIdx] ? String(row[subCatIdx]).trim() : '';
             const rawDesc = descIdx !== -1 && row[descIdx] ? String(row[descIdx]).trim() : '';
             
-            const isPest = checkPestControl(rawSubCat, rawDesc);
+            // Check for pest control purely by inspecting subType and Desc
+            const isPest = rawSubCat.toLowerCase().includes('cockroach') || 
+                           rawSubCat.toLowerCase().includes('rodent') || 
+                           rawSubCat.toLowerCase().includes('rat') || 
+                           rawSubCat.toLowerCase().includes('pest') ||
+                           rawDesc.toLowerCase().includes('cockroach') ||
+                           rawDesc.toLowerCase().includes('rodent');
 
             // Extract Train
             const rawTrain = (trainIdx !== -1 ? String(row[trainIdx]) : "") + " " + (trainNameIdx !== -1 ? String(row[trainNameIdx]) : "");
@@ -312,7 +326,7 @@ export default function App() {
                 date: parsedObj.date,
                 month: parsedObj.month,
                 shift: parsedObj.shift,
-                category: rawCat, // Sticking strictly to raw compTypeName
+                category: rawCat, // We use exact compTypeName from Raw CSV!
                 subType: rawSubCat,
                 isPest: isPest,
                 train: trainNo,
@@ -346,7 +360,7 @@ export default function App() {
         } else if (duplicatesSkipped > 0) {
             showToast(`Upload complete. No new data found. Skipped ${duplicatesSkipped} exact duplicates.`);
         } else {
-            showToast("Warning: Uploaded file contained no valid date entries.");
+            showToast("Warning: Uploaded file contained no valid date entries in 'createdOn' column.");
         }
       } catch (err) {
         console.error("Parse Error:", err);
@@ -377,6 +391,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans text-slate-900 relative">
+      {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 bg-slate-800 text-white px-6 py-4 rounded-xl shadow-2xl z-50 flex items-center animate-bounce border border-slate-700">
           <Sparkles className="w-5 h-5 mr-3 text-indigo-400" />
@@ -384,6 +399,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Hard Reset Modal */}
       {showResetModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white p-6 rounded-2xl shadow-xl max-w-sm w-full border border-slate-100 transform transition-all">
@@ -402,6 +418,7 @@ export default function App() {
         </div>
       )}
       
+      {/* SIDEBAR */}
       <aside className={`fixed md:sticky top-0 left-0 z-40 w-64 h-screen transition-transform transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 bg-white border-r border-slate-200 shadow-sm flex flex-col`}>
         <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-indigo-700">
           <div>
@@ -453,6 +470,7 @@ export default function App() {
         </div>
       </aside>
 
+      {/* MAIN CONTENT AREA */}
       <main className="flex-1 flex flex-col max-w-full overflow-hidden bg-slate-50">
         
         <header className="md:hidden bg-indigo-700 text-white p-4 flex justify-between items-center sticky top-0 z-30 shadow-md">
@@ -477,6 +495,7 @@ export default function App() {
 
         <div className="p-4 md:p-8 flex-1 overflow-y-auto space-y-8">
 
+          {/* EMPTY DATABASE STATE */}
           {(dbData.records || []).length === 0 ? (
              <div className="bg-white p-16 mt-10 rounded-3xl border border-slate-200 flex flex-col items-center justify-center text-center max-w-2xl mx-auto shadow-sm">
                <div className="w-24 h-24 bg-indigo-50 rounded-full flex items-center justify-center mb-6"><FileSpreadsheet className="w-12 h-12 text-indigo-400" /></div>
@@ -493,7 +512,7 @@ export default function App() {
              </div>
           ) : (
             <>
-              {/* TAB 1: OVERVIEW & FEEDBACK */}
+              {/* TAB 1: OVERVIEW & MoM */}
               {activeTab === 'overview' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -539,7 +558,7 @@ export default function App() {
               {activeTab === 'category' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-                    <div className="px-6 py-5 border-b border-slate-100 bg-slate-50"><h3 className="text-base font-bold text-slate-800">Category Wise Month-over-Month (MoM)</h3></div>
+                    <div className="px-6 py-5 border-b border-slate-100 bg-slate-50"><h3 className="text-base font-bold text-slate-800">Category Wise Month-over-Month (MoM) Table</h3></div>
                     <div className="overflow-x-auto max-h-[500px]">
                       <table className="min-w-full text-left border-collapse">
                         <thead className="sticky top-0 bg-slate-100 z-10 shadow-sm">
@@ -565,10 +584,10 @@ export default function App() {
                   <div className="bg-white rounded-2xl border border-rose-100 shadow-sm overflow-hidden">
                     <div className="px-6 py-5 border-b border-rose-100 bg-rose-50 flex items-center">
                        <Bug className="w-5 h-5 text-rose-600 mr-2" />
-                       <h3 className="text-base font-bold text-rose-900">Category: Pest Control & Rodent Target List</h3>
+                       <h3 className="text-base font-bold text-rose-900">Pest Control & Rodent Target List</h3>
                     </div>
                     {pestTable.length === 0 ? (
-                      <div className="p-8 text-center text-slate-500 font-medium">No Pest Control/Rodent complaints identified based on subtype scanning in this period.</div>
+                      <div className="p-8 text-center text-slate-500 font-medium">No Pest Control/Rodent complaints identified in this period.</div>
                     ) : (
                       <div className="overflow-x-auto max-h-96">
                         <table className="min-w-full text-left border-collapse">
@@ -577,7 +596,7 @@ export default function App() {
                               <th className="p-4 font-bold">Ref No</th>
                               <th className="p-4 font-bold">Date</th>
                               <th className="p-4 font-bold">Train</th>
-                              <th className="p-4 font-bold">Passenger SubType/Description</th>
+                              <th className="p-4 font-bold">Raw SubType & Passenger Desc.</th>
                             </tr>
                           </thead>
                           <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
@@ -587,7 +606,7 @@ export default function App() {
                                 <td className="p-4 font-medium whitespace-nowrap">{row.date}</td>
                                 <td className="p-4 font-bold text-rose-700">{row.train}</td>
                                 <td className="p-4 text-slate-600 max-w-md">
-                                  <span className="font-semibold text-slate-800">{row.subType}</span> <br/>
+                                  <span className="font-semibold text-slate-800">{row.subType || "No SubType"}</span> <br/>
                                   <span className="text-xs">{row.desc}</span>
                                 </td>
                               </tr>
