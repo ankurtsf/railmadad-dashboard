@@ -508,8 +508,9 @@ export default function App() {
     const dailyMap = new Map();
     const weeklyMap = new Map();
     const monthlyMap = new Map();
-    const categoryTrendMap = new Map();
-    const slaTrendMap = new Map();
+    
+    const catTrendMap = { day: new Map(), week: new Map(), month: new Map() };
+    const slaTrendMap = { day: new Map(), week: new Map(), month: new Map() };
     
     // Heatmap Max Values
     let maxZoneDivValue = 0;
@@ -606,18 +607,25 @@ export default function App() {
       weeklyMap.set(wKey, (weeklyMap.get(wKey) || 0) + 1);
       monthlyMap.set(mKey, (monthlyMap.get(mKey) || 0) + 1);
 
-      if (!categoryTrendMap.has(dKey)) categoryTrendMap.set(dKey, { date: dKey });
-      const ctObj = categoryTrendMap.get(dKey);
-      ctObj[r.category] = (ctObj[r.category] || 0) + 1;
+      // Track categories and SLAs across Day, Week, and Month for Tab 3
+      const keys = { day: dKey, week: wKey, month: mKey };
+      ['day', 'week', 'month'].forEach((g) => {
+        const key = keys[g];
+        // Category Trend
+        if (!catTrendMap[g].has(key)) catTrendMap[g].set(key, { date: key });
+        const ctObj = catTrendMap[g].get(key);
+        ctObj[r.category] = (ctObj[r.category] || 0) + 1;
 
-      if (!slaTrendMap.has(dKey)) slaTrendMap.set(dKey, { date: dKey, OnTime: 0, Breached: 0 });
-      const slaObj = slaTrendMap.get(dKey);
-      // Strictly defined: > 30 mins is Breached, <= 30 mins is OnTime
-      if (r.resTimeMins > 30) {
-        slaObj.Breached++;
-      } else {
-        slaObj.OnTime++;
-      }
+        // SLA Performance Trend
+        if (!slaTrendMap[g].has(key)) slaTrendMap[g].set(key, { date: key, OnTime: 0, Breached: 0 });
+        const slaObj = slaTrendMap[g].get(key);
+        // Strictly defined: > 30 mins is Breached, <= 30 mins is OnTime
+        if (r.resTimeMins > 30) {
+          slaObj.Breached++;
+        } else {
+          slaObj.OnTime++;
+        }
+      });
     });
 
     const uniqueCatsArray = Array.from(uniqueCats).sort();
@@ -647,6 +655,9 @@ export default function App() {
       .sort((a, b) => b.value - a.value).slice(0, 40)
       .map((w) => ({ ...w, fontSize: Math.max(12, Math.min(48, w.value * 1.5)) }));
 
+    // Top 5 Categories dynamically found for use in Trends area
+    const topCats = Array.from(catResMap.keys()).slice(0, 5);
+
     // Trend arrays
     const dailyTrendRaw = Array.from(dailyMap.entries())
       .map(([date, count]) => ({ key: date, count }))
@@ -670,14 +681,24 @@ export default function App() {
       .map(([key, count]) => ({ key, count }))
       .sort((a, b) => a.key.localeCompare(b.key));
 
-    const topCats = Array.from(catResMap.keys()).slice(0, 5);
-    const categoryTrend = Array.from(categoryTrendMap.values()).sort((a, b) => a.date.localeCompare(b.date));
-    
-    // Calculate Compliance Percentage for SLA Trend
-    const slaTrend = Array.from(slaTrendMap.values()).sort((a, b) => a.date.localeCompare(b.date)).map(item => ({
+    // Dynamic Category Trends based on Granularity Mapping
+    const categoryTrend = {
+      day: Array.from(catTrendMap.day.values()).sort((a, b) => a.date.localeCompare(b.date)),
+      week: Array.from(catTrendMap.week.values()).sort((a, b) => a.date.localeCompare(b.date)),
+      month: Array.from(catTrendMap.month.values()).sort((a, b) => a.date.localeCompare(b.date)),
+    };
+
+    // Calculate Compliance Percentage function for SLA Trend
+    const calcCompliance = (item) => ({
       ...item,
       Compliance: (item.OnTime + item.Breached) > 0 ? Math.round((item.OnTime / (item.OnTime + item.Breached)) * 100) : 0
-    }));
+    });
+
+    const slaTrend = {
+      day: Array.from(slaTrendMap.day.values()).sort((a, b) => a.date.localeCompare(b.date)).map(calcCompliance),
+      week: Array.from(slaTrendMap.week.values()).sort((a, b) => a.date.localeCompare(b.date)).map(calcCompliance),
+      month: Array.from(slaTrendMap.month.values()).sort((a, b) => a.date.localeCompare(b.date)).map(calcCompliance),
+    };
 
     return {
       kpis, kpisToday, sparklineArray, maxZoneDivValue, maxTrainCatValue, maxShiftVal, options: opt,
@@ -938,16 +959,24 @@ export default function App() {
     );
   }
 
+  // Determine current active granularity trend data
   const trendData = trendsGranularity === 'day' ? dailyTrend
     : trendsGranularity === 'week' ? weeklyTrend
       : monthlyTrend;
 
-  // Build category trend pivot for chart (top 5 categories)
-  const categoryTrendChartData = categoryTrend.map((row) => {
+  // Granularity dynamic label (e.g. "Daily", "Weekly", "Monthly")
+  const granularityLabel = trendsGranularity === 'day' ? 'Daily' : trendsGranularity.charAt(0).toUpperCase() + trendsGranularity.slice(1) + 'ly';
+
+  // Build category trend pivot for chart (top 5 categories) dynamically based on selected granularity
+  const currentCategoryTrend = categoryTrend[trendsGranularity] || [];
+  const categoryTrendChartData = currentCategoryTrend.map((row) => {
     const obj = { date: row.date };
     topCats.forEach((c) => { obj[c] = row[c] || 0; });
     return obj;
   });
+
+  // Pull SLA performance trend dynamically based on selected granularity
+  const currentSlaTrend = slaTrend[trendsGranularity] || [];
 
   const axisStyle = { fontSize: 11, fill: theme === 'dark' ? '#94a3b8' : '#64748b' };
   const gridStroke = theme === 'dark' ? '#1e293b' : '#f1f5f9';
@@ -1367,7 +1396,7 @@ export default function App() {
               {activeTab === 'trends' && (
                 <div className="space-y-8 animate-fade-in">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-base font-bold text-slate-700 dark:text-slate-200">Volume Trend</h3>
+                    <h3 className="text-base font-bold text-slate-700 dark:text-slate-200">Trends Filter</h3>
                     <div className="inline-flex bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
                       {['day', 'week', 'month'].map((g) => {
                         const label = g === 'day' ? 'Daily' : g.charAt(0).toUpperCase() + g.slice(1) + 'ly';
@@ -1388,7 +1417,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <Card title={`Complaint Volume — ${trendsGranularity === 'day' ? 'Daily' : trendsGranularity.charAt(0).toUpperCase() + trendsGranularity.slice(1) + 'ly'}`} icon={TrendingUp}>
+                  <Card title={`Complaint Volume Trend (${granularityLabel})`} icon={TrendingUp}>
                     <div className="h-[360px]">
                       <ResponsiveContainer width="100%" height="100%">
                         <ComposedChart data={trendData} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
@@ -1410,7 +1439,7 @@ export default function App() {
                     </div>
                   </Card>
 
-                  <Card title="Top 5 Categories Trend (Daily)" icon={BarChart}>
+                  <Card title={`Top 5 Categories Trend (${granularityLabel})`} icon={BarChart}>
                     <div className="h-[360px]">
                       <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={categoryTrendChartData} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
@@ -1427,10 +1456,10 @@ export default function App() {
                     </div>
                   </Card>
 
-                  <Card title="SLA Performance Trend" icon={Target}>
+                  <Card title={`SLA Performance Trend (${granularityLabel})`} icon={Target}>
                     <div className="h-[320px]">
                       <ResponsiveContainer width="100%" height="100%">
-                        <ComposedChart data={slaTrend} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
+                        <ComposedChart data={currentSlaTrend} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
                           <XAxis dataKey="date" tick={axisStyle} tickLine={false} axisLine={false} />
                           <YAxis yAxisId="left" tick={axisStyle} tickLine={false} axisLine={false} />
