@@ -38,7 +38,7 @@ const iconMap = {
   AlertTriangle: AlertTriangle
 };
 
-// --- DATE-BASED DATABASE (Supports Append & Timeline) ---
+// --- DATE-BASED DATABASE ---
 const initialRawDatabase = {
   records: [
     {
@@ -68,7 +68,7 @@ const initialRawDatabase = {
   ]
 };
 
-// Aggregation Engine: Combines daily records into a single dashboard view based on selected dates
+// Aggregation Engine
 const aggregateData = (records, fromDate, toDate) => {
   const filtered = (records || []).filter(r => r.date >= fromDate && r.date <= toDate);
   if (filtered.length === 0) return null;
@@ -95,7 +95,7 @@ const aggregateData = (records, fromDate, toDate) => {
     });
 
     trends.push({
-      day: r.date.slice(5), // MM-DD format
+      day: r.date.slice(5), // MM-DD
       Cleanliness: r.categories?.['Cleanliness'] || 0,
       Bedroll: r.categories?.['Bedroll'] || 0,
       Watering: r.categories?.['Watering'] || 0,
@@ -155,6 +155,26 @@ const MetricCard = ({ title, value, icon: Icon, subtext, colorClass }) => (
   </div>
 );
 
+// Helper function to safely extract dates from Excel formats
+const extractDateFromExcel = (raw) => {
+  if (!raw) return null;
+  if (typeof raw === 'number') {
+      const d = new Date(Math.round((raw - 25569) * 86400 * 1000));
+      return d.toISOString().split('T')[0];
+  }
+  const str = String(raw).trim().split(' ')[0];
+  const parts = str.split(/[-/]/);
+  if (parts.length === 3) {
+      if (parts[2].length === 4) return `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
+      if (parts[0].length === 4) return `${parts[0]}-${parts[1].padStart(2,'0')}-${parts[2].padStart(2,'0')}`;
+  }
+  try {
+      const d = new Date(raw);
+      if (!isNaN(d)) return d.toISOString().split('T')[0];
+  } catch(e) {}
+  return null;
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -162,19 +182,17 @@ export default function App() {
   const [lastSync, setLastSync] = useState('Just now');
   const [dbData, setDbData] = useState(initialRawDatabase);
   
-  // Timeline Filters & Append States
+  // Timeline Filters
   const [fromDate, setFromDate] = useState('2025-05-10');
   const [toDate, setToDate] = useState('2025-05-12');
-  const [uploadDate, setUploadDate] = useState(new Date().toISOString().split('T')[0]);
+  const [fallbackDate, setFallbackDate] = useState(new Date().toISOString().split('T')[0]);
   
-  // Custom Modals and Toasts
   const [toastMessage, setToastMessage] = useState('');
   const [showResetModal, setShowResetModal] = useState(false);
 
-  // Show a non-intrusive toast instead of alert()
   const showToast = (msg) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(''), 4000);
+    setTimeout(() => setToastMessage(''), 5000);
   };
 
   useEffect(() => {
@@ -202,7 +220,6 @@ export default function App() {
     return () => supabase.removeChannel(channel);
   }, []);
 
-  // Aggregated data based on timeline filter
   const currentData = useMemo(() => aggregateData(dbData.records, fromDate, toDate), [dbData, fromDate, toDate]);
 
   const aiInsights = useMemo(() => {
@@ -212,19 +229,18 @@ export default function App() {
     const topTrain = [...currentData.trains].sort((a, b) => b.rate - a.rate)[0];
     const topCategory = [...currentData.categories].sort((a, b) => b.value - a.value)[0];
     
-    insights.push(`Timeline View (${fromDate} to ${toDate}): Total volume handled is ${currentData.kpis.total} complaints.`);
-    insights.push(`Systemic Issue: Trains on the NDLS route consistently show high UNAVOIDABLE watering complaints, pointing to a permanent hydrant deficiency.`);
-
-    if (topTrain) {
-        insights.push(`Action Required: Train ${topTrain.train} has the highest complaint rate (${topTrain.rate} per day). ${topTrain.avoidable} of these were avoidable (staff/OBHS issues).`);
-    }
+    insights.push(`Timeline View (${fromDate} to ${toDate}): Processed ${currentData.kpis.total} cases across selected dates.`);
+    
     if (topCategory) {
-        insights.push(`Resource Focus: ${topCategory.name} remains the highest grievance area (${topCategory.value} cases). Recommend deploying extra spot-checks.`);
+        insights.push(`Resource Focus: ${topCategory.name} remains the primary grievance area (${topCategory.value} cases).`);
+    }
+    if (topTrain) {
+        insights.push(`Action Required: Train ${topTrain.train} has the highest volume (${topTrain.complaints} complaints). Review operational bottlenecks.`);
     }
     return insights;
   }, [fromDate, toDate, currentData]);
 
-  // Robust Append Logic
+  // --- SMART DATA APPEND LOGIC ---
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -237,63 +253,115 @@ export default function App() {
         const workbook = XLSX.read(bstr, { type: 'binary' });
         const newData = JSON.parse(JSON.stringify(dbData));
         
-        // Prepare the new daily record defaults
-        const newRecord = {
-          date: uploadDate,
-          kpis: { total: 0, resolved: 98.0, time: 60, unsat: 3.0 },
-          categories: { 'Cleanliness': 0, 'Bedroll': 0, 'Watering': 0, 'Maintenance': 0, 'Staff Behavior': 0 },
-          trains: {}, shifts: {}, feedback: []
-        };
-
-        // Safer sheet extraction (handles missing SheetNames or mismatched names like CSVs)
         const sheetNames = workbook.SheetNames || [];
         const targetSheetName = sheetNames.find(name => name.toLowerCase().includes('drm')) || sheetNames[0];
 
         if (targetSheetName && workbook.Sheets) {
            const worksheet = workbook.Sheets[targetSheetName];
-           const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) || [];
+           const jsonObjects = XLSX.utils.sheet_to_json(worksheet) || [];
            
-           // Extract KPIs dynamically
-           const totalRow = jsonData.find(row => row && row[1] === 'Total');
-           if (totalRow) newRecord.kpis.total = parseInt(totalRow[3], 10) || 0;
+           if (jsonObjects.length > 0) {
+             const headers = Object.keys(jsonObjects[0]);
+             // Look for a column indicating the date
+             const dateCol = headers.find(h => h.toLowerCase().includes('created on') || h.toLowerCase() === 'date' || h.toLowerCase().includes('complaint date'));
+             
+             if (dateCol) {
+                // -------------------------------------------------------------
+                // 1. SMART EXTRACTION: Found dates, parse row by row
+                // -------------------------------------------------------------
+                const groupedByDate = {};
+                const catCol = headers.find(h => h.toLowerCase().includes('category') || h.toLowerCase().includes('head'));
+                
+                jsonObjects.forEach(row => {
+                   const dateStr = extractDateFromExcel(row[dateCol]);
+                   if (!dateStr) return; // Skip invalid rows
+                   
+                   if (!groupedByDate[dateStr]) {
+                       groupedByDate[dateStr] = { total: 0, categories: { 'Cleanliness':0, 'Bedroll':0, 'Watering':0, 'Maintenance':0, 'Staff Behavior':0 } };
+                   }
+                   
+                   groupedByDate[dateStr].total += 1;
+                   
+                   if (catCol) {
+                       const rawCat = String(row[catCol]).toLowerCase();
+                       let mappedCat = 'Other';
+                       if (rawCat.includes('clean')) mappedCat = 'Cleanliness';
+                       else if (rawCat.includes('bed') || rawCat.includes('linen')) mappedCat = 'Bedroll';
+                       else if (rawCat.includes('water')) mappedCat = 'Watering';
+                       else if (rawCat.includes('maintain') || rawCat.includes('repair')) mappedCat = 'Maintenance';
+                       else if (rawCat.includes('staff') || rawCat.includes('behav')) mappedCat = 'Staff Behavior';
+                       
+                       if (groupedByDate[dateStr].categories[mappedCat] !== undefined) {
+                           groupedByDate[dateStr].categories[mappedCat] += 1;
+                       }
+                   }
+                });
 
-           // Extract Categories dynamically
-           ['Cleanliness', 'Bedroll', 'Watering', 'Maintenance', 'Staff Behavior'].forEach(cat => {
-              const catRow = jsonData.find(r => r && r[1] === cat);
-              if (catRow) newRecord.categories[cat] = parseInt(catRow[3], 10) || 0;
-           });
+                // Append the grouped daily summaries to our database
+                const datesAppended = [];
+                Object.entries(groupedByDate).forEach(([dStr, groupData]) => {
+                    const newRecord = {
+                        date: dStr,
+                        kpis: { total: groupData.total, resolved: 98.0, time: 60, unsat: 2.0 },
+                        categories: groupData.categories,
+                        trains: {}, shifts: {}, feedback: []
+                    };
+                    const existingIndex = newData.records.findIndex(r => r.date === dStr);
+                    if (existingIndex >= 0) newData.records[existingIndex] = newRecord;
+                    else newData.records.push(newRecord);
+                    datesAppended.push(dStr);
+                });
+                
+                showToast(`Success! Extracted and appended data for: ${datesAppended.join(', ')}`);
+
+             } else {
+                // -------------------------------------------------------------
+                // 2. FALLBACK EXTRACTION: No date column, use manual fallbackDate
+                // -------------------------------------------------------------
+                const newRecord = {
+                  date: fallbackDate,
+                  kpis: { total: 0, resolved: 98.0, time: 60, unsat: 3.0 },
+                  categories: { 'Cleanliness': 0, 'Bedroll': 0, 'Watering': 0, 'Maintenance': 0, 'Staff Behavior': 0 },
+                  trains: {}, shifts: {}, feedback: []
+                };
+
+                const jsonDataArray = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) || [];
+                const totalRow = jsonDataArray.find(row => row && row[1] === 'Total');
+                if (totalRow) newRecord.kpis.total = parseInt(totalRow[3], 10) || 0;
+
+                ['Cleanliness', 'Bedroll', 'Watering', 'Maintenance', 'Staff Behavior'].forEach(cat => {
+                   const catRow = jsonDataArray.find(r => r && r[1] === cat);
+                   if (catRow) newRecord.categories[cat] = parseInt(catRow[3], 10) || 0;
+                });
+
+                const existingIndex = newData.records.findIndex(r => r.date === fallbackDate);
+                if (existingIndex >= 0) newData.records[existingIndex] = newRecord;
+                else newData.records.push(newRecord);
+
+                showToast(`Appended summarized data for manually selected date: ${fallbackDate}.`);
+             }
+           }
         }
         
-        // APPEND OR OVERWRITE: If the date exists, update it. If not, append it.
-        const existingIndex = newData.records.findIndex(r => r.date === uploadDate);
-        if (existingIndex >= 0) {
-           newData.records[existingIndex] = newRecord;
-        } else {
-           newData.records.push(newRecord);
-        }
-        
-        // Try saving to Supabase
+        // Push final state to database
         const { error } = await supabase.from('railmadad_sync').update({ 
             json_data: newData, 
             last_updated: new Date().toISOString() 
         }).eq('id', 1);
           
         if (error) throw error;
-
-        showToast(`Success! Appended Excel data for ${uploadDate}.`);
         
       } catch (err) {
         console.error(err);
-        showToast("Error parsing Excel. Please check the file format.");
+        showToast("Error processing Excel. Please check the file structure.");
       }
       
       setIsUploading(false);
-      e.target.value = null; // Reset input 
+      e.target.value = null; 
     };
     reader.readAsBinaryString(file);
   };
 
-  // Hard Reset Logic
   const executeHardReset = async () => {
     setShowResetModal(false);
     showToast("Resetting database...");
@@ -315,9 +383,9 @@ export default function App() {
       
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 bg-slate-800 text-white px-6 py-3 rounded-xl shadow-2xl z-50 flex items-center animate-bounce">
+        <div className="fixed bottom-6 right-6 bg-slate-800 text-white px-6 py-4 rounded-xl shadow-2xl z-50 flex items-center animate-bounce">
           <Sparkles className="w-5 h-5 mr-3 text-indigo-400" />
-          <span className="font-medium text-sm">{toastMessage}</span>
+          <span className="font-medium text-sm leading-snug">{toastMessage}</span>
         </div>
       )}
 
@@ -363,14 +431,17 @@ export default function App() {
              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Append Data</p>
            </div>
            
-           <div className="mb-3">
-             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1 mb-1 block">Report Date</label>
-             <input type="date" value={uploadDate} onChange={e => setUploadDate(e.target.value)} className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 outline-none focus:border-indigo-500" />
+           <div className="mb-4 bg-white p-3 rounded-lg border border-slate-200">
+             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block leading-snug">
+               Fallback Date<br/>
+               <span className="text-slate-400 font-normal normal-case text-[9px]">(If Excel has no "Created On" column)</span>
+             </label>
+             <input type="date" value={fallbackDate} onChange={e => setFallbackDate(e.target.value)} className="w-full text-sm border-none bg-slate-50 rounded px-2 py-1.5 text-slate-700 outline-none" />
            </div>
 
            <label className="flex items-center justify-center w-full px-4 py-2.5 bg-indigo-600 text-white rounded-lg shadow-sm hover:bg-indigo-700 cursor-pointer transition-colors active:scale-95">
               {isUploading ? (
-                <span className="animate-pulse flex items-center text-sm font-bold">Parsing...</span>
+                <span className="animate-pulse flex items-center text-sm font-bold">Processing...</span>
               ) : (
                 <>
                   <Upload className="w-4 h-4 mr-2" />
@@ -425,7 +496,7 @@ export default function App() {
         </header>
 
         {/* Global Filter Bar (Timeline) */}
-        <div className="bg-white border-b border-slate-200 px-4 md:px-8 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-4 sm:space-y-0 z-20 sticky top-0 md:top-0">
+        <div className="bg-white border-b border-slate-200 px-4 md:px-8 py-4 flex flex-col lg:flex-row justify-between items-start lg:items-center space-y-4 lg:space-y-0 z-20 sticky top-0 md:top-0">
            <h2 className="text-xl font-bold text-slate-800">
              {navItems.find(i => i.id === activeTab)?.label}
            </h2>
