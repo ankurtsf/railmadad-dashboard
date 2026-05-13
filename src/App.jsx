@@ -23,8 +23,8 @@ const parseRawDate = (raw) => {
     if (!raw) return null;
     const str = String(raw).trim();
     
-    // Ignore pure floats (PNRs / Reference Numbers)
-    if (/^\d+\.\d+$/.test(str)) return null; 
+    // Ignore floating point reference numbers masquerading as strings
+    if (/^\d+\.\d+$/.test(str) && str.length > 8) return null; 
 
     // Handle Excel serial number conversion
     if (!isNaN(raw) && typeof raw === 'number' && raw > 40000 && raw < 60000) {
@@ -161,7 +161,7 @@ export default function App() {
     loadDependencies();
   }, []);
 
-  // 2. Fetch Data from Supabase (Persistence)
+  // 2. Fetch Data from Supabase
   const fetchCloudData = async () => {
     if (!supabaseClient) return;
     try {
@@ -317,12 +317,12 @@ export default function App() {
         
         if (!rawArray || rawArray.length === 0) throw new Error("File is empty.");
 
-        // Dynamic header detection (scans up to 50 rows)
+        // Aggressive header detection (scans up to 100 rows)
         let headerRowIdx = -1;
         let colMap = {};
         const keyHeaders = ['complaintrefno', 'refno', 'createdon', 'comptypename', 'trainstation'];
         
-        for (let i = 0; i < Math.min(50, rawArray.length); i++) {
+        for (let i = 0; i < Math.min(100, rawArray.length); i++) {
             const row = rawArray[i];
             if (!row || !Array.isArray(row)) continue;
             
@@ -339,7 +339,7 @@ export default function App() {
         }
 
         if (headerRowIdx === -1) {
-            showToast("⚠️ Could not find standardized headers. Please check Excel format.");
+            showToast("⚠️ Standard headers not found. Check if this is the Raw Data file.");
             setIsUploading(false);
             e.target.value = null; 
             return;
@@ -355,7 +355,6 @@ export default function App() {
         baseRecords.forEach(r => existingMap.set(String(r.id), r));
 
         let newRecordsAdded = 0;
-        let duplicatesSkipped = 0;
 
         for (let i = headerRowIdx + 1; i < rawArray.length; i++) {
             const row = rawArray[i];
@@ -366,10 +365,7 @@ export default function App() {
             if (!refNo || !createdOn) continue; 
 
             const recordId = String(refNo).trim();
-            if (existingMap.has(recordId)) {
-                duplicatesSkipped++;
-                continue;
-            }
+            if (existingMap.has(recordId)) continue;
 
             const parsedObj = parseRawDate(createdOn);
             if (!parsedObj) continue;
@@ -419,33 +415,22 @@ export default function App() {
             setFromDate(sortedDates[0]);
             setToDate(sortedDates[sortedDates.length - 1]);
 
-            showToast(`✅ Added ${newRecordsAdded} records. Cloud syncing...`);
+            showToast(`✅ Added ${newRecordsAdded} records.`);
 
-            const { error } = await supabaseClient.from('railmadad_sync').upsert({ 
+            await supabaseClient.from('railmadad_sync').upsert({ 
                 id: 1,
                 json_data: newData, 
                 last_updated: new Date().toISOString() 
             });
-
-            if (error) {
-                console.error("Cloud Save failed", error);
-                showToast("⚠️ Cloud Sync failed. Data saved locally only.");
-            } else {
-                showToast(`✅ Cloud Storage updated successfully.`);
-            }
         } else {
-            showToast("No new records were added (Duplicates found).");
+            showToast("No new records were added (Duplicates detected).");
         }
       } catch (err) {
-        console.error("Critical Parse Error:", err);
+        console.error("Parse Error:", err);
         showToast("❌ Unexpected error processing file.");
       }
       setIsUploading(false);
       e.target.value = null; 
-    };
-    reader.onerror = () => {
-        showToast("❌ Error reading file buffer.");
-        setIsUploading(false);
     };
     reader.readAsArrayBuffer(file);
   };
@@ -462,7 +447,7 @@ export default function App() {
 
     try {
       await supabaseClient.from('railmadad_sync').upsert({ id: 1, json_data: initialRawDatabase, last_updated: new Date().toISOString() });
-      showToast("✅ Database wiped clean (Local & Cloud).");
+      showToast("✅ Database wiped clean.");
     } catch (err) {
       showToast("⚠️ Cloud reset failed.");
     }
@@ -485,7 +470,7 @@ export default function App() {
             </div>
             <h3 className="text-xl font-bold text-slate-800 mb-2">Wipe Database?</h3>
             <p className="text-sm text-slate-500 mb-6 leading-relaxed">
-              This will permanently delete all data from Local and Cloud storage.
+              This will permanently delete all raw data.
             </p>
             <div className="flex space-x-3">
               <button onClick={() => setShowResetModal(false)} className="flex-1 py-2.5 rounded-lg border border-slate-200 text-slate-600 font-semibold text-sm hover:bg-slate-50 transition-colors">Cancel</button>
@@ -495,7 +480,6 @@ export default function App() {
         </div>
       )}
       
-      {/* SIDEBAR */}
       <aside className={`fixed md:sticky top-0 left-0 z-40 w-64 h-screen transition-transform transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 bg-white border-r border-slate-200 shadow-sm flex flex-col`}>
         <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-indigo-700">
           <div>
