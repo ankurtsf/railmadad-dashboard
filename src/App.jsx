@@ -9,7 +9,7 @@ import {
   Sparkles, Menu, X, AlertTriangle, Upload, Calendar, Trash2,
   FileSpreadsheet, Bug, Map as LucideMap, Filter, ChevronDown, Loader2,
   Target, Moon, Sun, Download, TrendingUp, LogOut, Lock, Mail,
-  Eye, EyeOff, FileText, FileBarChart, BedDouble, Droplets, Wrench, Activity
+  Eye, EyeOff, FileText, FileBarChart, BedDouble, Droplets, Wrench, Activity, BookOpen, ThumbsDown, ArrowUpRight, ArrowDownRight
 } from 'lucide-react';
 
 // ──────────────────────────────────────────────────────────────────
@@ -136,28 +136,45 @@ const navItemsList = [
   { id: 'trends', label: 'Trends Over Time', icon: TrendingUp },
   { id: 'assets', label: 'Root Cause & Assets', icon: Target },
   { id: 'sentiment', label: 'Passenger Sentiment', icon: MessageSquareWarning },
+  { id: 'dictionary', label: 'Data Dictionary', icon: BookOpen },
 ];
 
-const MetricCard = ({ title, value, todayValue, icon: Icon, accent, sparkColor, sparklineData, dataKey, onTodayClick }) => (
-  <div className="relative bg-white dark:bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col justify-between overflow-hidden transition-colors h-32">
+const MetricCard = ({ title, value, todayValue, icon: Icon, accent, sparkColor, sparklineData, dataKey, onTodayClick, infoText, isCritical, extraIcon }) => (
+  <div className={`relative bg-white dark:bg-slate-900 rounded-xl p-5 shadow-sm border ${isCritical ? 'border-rose-400 bg-rose-50 dark:bg-rose-950/20' : 'border-slate-100 dark:border-slate-800'} flex flex-col justify-between overflow-hidden transition-colors h-32`}>
     <div className="relative z-10 flex justify-between items-start mb-1">
-      <div>
-        <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">{title}</p>
-        <h3 className="text-3xl font-black text-slate-900 dark:text-white">{value}</h3>
+      <div className="flex items-center">
+        <p className={`text-[11px] font-bold uppercase tracking-wider ${isCritical ? 'text-rose-700 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400'}`}>{title}</p>
+        {infoText && (
+          <div className="relative group ml-1.5 flex items-center justify-center">
+            <div className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[9px] font-black cursor-help ${isCritical ? 'bg-rose-200 text-rose-700 dark:bg-rose-900 dark:text-rose-300' : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>i</div>
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2.5 bg-slate-800 dark:bg-slate-700 text-white text-xs font-medium rounded-lg shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 text-center leading-tight">
+              {infoText}
+              <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800 dark:border-t-slate-700"></div>
+            </div>
+          </div>
+        )}
       </div>
-      <div className={`p-2.5 rounded-lg ${accent}`}>
-        <Icon className="w-5 h-5 text-white" />
+      <div className={`p-2 rounded-lg ${accent}`}>
+        <Icon className="w-4 h-4 text-white" />
       </div>
     </div>
     <div className="relative z-10 flex items-center">
-        <button 
-           onClick={onTodayClick} 
-           title="Click to filter by Today"
-           className="text-xs font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/40 hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors cursor-pointer"
-        >
-           Today: {todayValue}
-        </button>
+        <h3 className={`text-3xl font-black ${isCritical ? 'text-rose-800 dark:text-rose-300' : 'text-slate-900 dark:text-white'} flex items-center`}>
+          {value}
+          {extraIcon && <span className="ml-2">{extraIcon}</span>}
+        </h3>
     </div>
+    {todayValue !== undefined && onTodayClick && (
+      <div className="relative z-10 flex items-center mt-auto pt-2">
+          <button 
+             onClick={onTodayClick} 
+             title="Click to filter by Today"
+             className="text-[10px] font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/40 hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors cursor-pointer"
+          >
+             Today: {todayValue}
+          </button>
+      </div>
+    )}
     {sparklineData && sparklineData.length > 0 && (
       <div className="absolute bottom-0 left-0 right-0 h-16 opacity-30 pointer-events-none">
         <ResponsiveContainer width="100%" height="100%">
@@ -251,7 +268,7 @@ const ScatterTooltip = ({ active, payload }) => {
     const data = payload[0].payload;
     return (
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-3 rounded-lg shadow-lg">
-        <p className="font-bold text-slate-800 dark:text-white mb-1">Ref: {data.name}</p>
+        <p className="font-bold text-slate-800 dark:text-white mb-1">Train: {data.train || 'Unknown'} | Ref: {data.name}</p>
         <p className="text-sm font-medium text-slate-600 dark:text-slate-300">{formatCategory(data.categoryName || data.category)}</p>
         <p className="text-sm font-black text-indigo-600 dark:text-indigo-400 mt-1">{formatTime(data.time)} to resolve</p>
       </div>
@@ -367,11 +384,10 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState('');
   const [showResetModal, setShowResetModal] = useState(false);
   const [trendsGranularity, setTrendsGranularity] = useState('day'); 
+  const [datePreset, setDatePreset] = useState('Custom');
 
-  const todayStr = new Date().toISOString().split('T')[0];
-  const lastMonthStr = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   const [filters, setFilters] = useState({
-    fromDate: lastMonthStr, toDate: todayStr,
+    fromDate: '', toDate: '',
     timeBucket: [], train: [], coachType: [], zone: [], location: [],
     category: [], sla: [], rating: [], status: []
   });
@@ -393,19 +409,46 @@ export default function App() {
     setTimeout(() => setToastMessage(''), 5000);
   };
 
-  const updateFilter = (key, value) => setFilters((prev) => ({ ...prev, [key]: value }));
-  
-  const handleTodayClick = () => {
-    setFilters(prev => ({ ...prev, fromDate: todayStr, toDate: todayStr }));
-    showToast("Filtered to Today's Volume");
+  const updateFilter = (key, value) => {
+    setFilters((prev) => ({ ...prev, [key]: value }));
+    if (key === 'fromDate' || key === 'toDate') setDatePreset('Custom');
   };
+  
+  const getLatestDateStr = useCallback(() => {
+    if (!dbData.records || dbData.records.length === 0) return new Date().toISOString().split('T')[0];
+    const sorted = [...dbData.records].map(r => r.date).sort();
+    return sorted[sorted.length - 1];
+  }, [dbData.records]);
+
+  const handleDatePreset = useCallback((preset) => {
+    setDatePreset(preset);
+    const latestStr = getLatestDateStr();
+    const latestObj = new Date(latestStr);
+    const format = (d) => d.toISOString().split('T')[0];
+    
+    if (preset === 'Today') {
+      setFilters(prev => ({ ...prev, fromDate: latestStr, toDate: latestStr }));
+    } else if (preset === 'This Week') {
+      const lastWeek = new Date(latestObj);
+      lastWeek.setDate(latestObj.getDate() - 7);
+      setFilters(prev => ({ ...prev, fromDate: format(lastWeek), toDate: latestStr }));
+    } else if (preset === 'This Month') {
+      const firstDay = new Date(latestObj.getFullYear(), latestObj.getMonth(), 1);
+      setFilters(prev => ({ ...prev, fromDate: format(firstDay), toDate: latestStr }));
+    } else if (preset === 'Overall') {
+      setFilters(prev => ({ ...prev, fromDate: '', toDate: '' }));
+    }
+  }, [getLatestDateStr]);
 
   const applyDashboardData = (dataObj, syncMessage) => {
     setDbData(dataObj);
     setLastSync(syncMessage);
     if (dataObj.records && dataObj.records.length > 0) {
       const sortedDates = [...dataObj.records].map((r) => r.date).sort();
-      setFilters((prev) => ({ ...prev, fromDate: sortedDates[0], toDate: sortedDates[sortedDates.length - 1] }));
+      const latest = sortedDates[sortedDates.length - 1];
+      const firstDay = new Date(new Date(latest).getFullYear(), new Date(latest).getMonth(), 1).toISOString().split('T')[0];
+      setFilters((prev) => ({ ...prev, fromDate: firstDay, toDate: latest }));
+      setDatePreset('This Month');
     }
   };
 
@@ -487,7 +530,8 @@ export default function App() {
     });
 
     const validRecords = rawRecords.filter((r) => {
-      if (r.date < filters.fromDate || r.date > filters.toDate) return false;
+      if (filters.fromDate && r.date < filters.fromDate) return false;
+      if (filters.toDate && r.date > filters.toDate) return false;
       if (filters.timeBucket.length > 0 && !filters.timeBucket.includes(r.shift2)) return false;
       if (filters.train.length > 0 && !filters.train.includes(r.train)) return false;
       if (filters.coachType.length > 0 && !filters.coachType.includes(r.coachType)) return false;
@@ -500,7 +544,7 @@ export default function App() {
       return true;
     });
 
-    const targetToday = filters.toDate;
+    const targetToday = filters.toDate || (rawRecords.length ? rawRecords.sort((a,b)=>a.date.localeCompare(b.date))[rawRecords.length-1].date : '');
     const kpis = { total: validRecords.length, bedroll: 0, clean: 0, water: 0, maint: 0 };
     const kpisToday = { total: 0, bedroll: 0, clean: 0, water: 0, maint: 0 };
     
@@ -532,6 +576,13 @@ export default function App() {
     let maxZoneDivValue = 0;
     let maxTrainCatValue = 0;
     let maxShiftVal = 0;
+    
+    let totalResTime = 0;
+    let resolvedCount = 0;
+    let openCount = 0;
+    let slaBreachCount = 0;
+    let totalRated = 0;
+    let totalUnsat = 0;
 
     validRecords.forEach((r) => {
       const catLow = String(r.category).toLowerCase();
@@ -542,7 +593,6 @@ export default function App() {
       sparkObj.total++;
       if (isToday) kpisToday.total++;
 
-      // BUG FIX: Added 'bed roll' to match un-concatenated strings
       if (catLow.includes('bedroll') || catLow.includes('bed roll') || catLow.includes('linen')) { kpis.bedroll++; sparkObj.bedroll++; if(isToday) kpisToday.bedroll++; }
       if (catLow.includes('clean') || catLow.includes('dirt')) { kpis.clean++; sparkObj.clean++; if(isToday) kpisToday.clean++; }
       if (catLow.includes('water') || catLow.includes('plumb')) { kpis.water++; sparkObj.water++; if(isToday) kpisToday.water++; }
@@ -569,17 +619,30 @@ export default function App() {
       sObj[r.category] = (sObj[r.category] || 0) + 1;
       if (sObj[r.category] > maxShiftVal) maxShiftVal = sObj[r.category];
 
-      if (r.resTimeMins > 0) {
-        scatterData.push({ category: r.category, time: r.resTimeMins, name: r.id });
+      if (r.status && !r.status.toLowerCase().includes('clos') && !r.status.toLowerCase().includes('resolv')) {
+         openCount++;
+      }
+
+      if (r.resTimeMins >= 0 && r.status.toLowerCase().includes('clos')) {
+        scatterData.push({ category: r.category, time: r.resTimeMins, name: r.id, train: r.train });
         if (!catResMap.has(r.category)) catResMap.set(r.category, { category: r.category, sum: 0, count: 0 });
         const cr = catResMap.get(r.category);
         cr.sum += r.resTimeMins; cr.count++;
+        
+        totalResTime += r.resTimeMins;
+        resolvedCount++;
+        if (r.resTimeMins > 30) slaBreachCount++;
 
         const rateStr = String(r.rating).toLowerCase();
         const rateCat = rateStr.includes('unsatisfactory') ? 'Unsatisfactory' : (rateStr.includes('satisfactory') ? 'Satisfactory' : 'Neutral');
         if (r.resTimeMins < 15) quickCloseMap['< 15m'][rateCat]++;
         else if (r.resTimeMins <= 60) quickCloseMap['15-60m'][rateCat]++;
         else quickCloseMap['> 60m'][rateCat]++;
+      }
+
+      if (r.rating && !r.rating.toLowerCase().includes('not rated')) {
+         totalRated++;
+         if (r.rating.toLowerCase().includes('unsatisfactory')) totalUnsat++;
       }
 
       if (catLow.includes('water') && r.nextStation && r.nextStation !== 'Unknown') {
@@ -624,6 +687,39 @@ export default function App() {
         else slaObj.OnTime++;
       });
     });
+    
+    // WoW Calc (relative to targetToday or latest record)
+    let current7DaysVol = 0;
+    let previous7DaysVol = 0;
+    if (rawRecords.length > 0) {
+      const baseDateObj = targetToday ? new Date(targetToday) : new Date(rawRecords.sort((a,b)=>a.date.localeCompare(b.date))[rawRecords.length-1].date);
+      const current7Start = new Date(baseDateObj);
+      current7Start.setDate(current7Start.getDate() - 6);
+      const prev7End = new Date(current7Start);
+      prev7End.setDate(prev7End.getDate() - 1);
+      const prev7Start = new Date(prev7End);
+      prev7Start.setDate(prev7Start.getDate() - 6);
+
+      const fCurrent7Start = current7Start.toISOString().split('T')[0];
+      const fToDate = baseDateObj.toISOString().split('T')[0];
+      const fPrev7Start = prev7Start.toISOString().split('T')[0];
+      const fPrev7End = prev7End.toISOString().split('T')[0];
+
+      rawRecords.forEach(r => {
+        let matchOther = true;
+        if (filters.timeBucket.length > 0 && !filters.timeBucket.includes(r.shift2)) matchOther = false;
+        if (filters.train.length > 0 && !filters.train.includes(r.train)) matchOther = false;
+        if (filters.coachType.length > 0 && !filters.coachType.includes(r.coachType)) matchOther = false;
+        if (filters.zone.length > 0 && !filters.zone.includes(r.zone) && !filters.zone.includes(r.ownZone)) matchOther = false;
+        if (filters.location.length > 0 && !filters.location.includes(r.nextStation)) matchOther = false;
+        if (filters.category.length > 0 && !filters.category.includes(r.category)) matchOther = false;
+        
+        if (matchOther) {
+           if (r.date >= fCurrent7Start && r.date <= fToDate) current7DaysVol++;
+           if (r.date >= fPrev7Start && r.date <= fPrev7End) previous7DaysVol++;
+        }
+      });
+    }
 
     const uniqueCatsArray = Array.from(uniqueCats).sort();
     const uniqueDivsArray = Array.from(uniqueDivs).sort();
@@ -633,22 +729,15 @@ export default function App() {
     const sparklineArray = Array.from(dailySparkMap.values()).sort((a,b) => a.date.localeCompare(b.date));
     const shiftHeatmap = Array.from(shiftCatMap.values()).sort((a, b) => String(a.shift).localeCompare(String(b.shift)));
     
-    // Simulate categorical jitter by mapping categories to a numeric X-axis index +/- random offset
     const finalScatterData = scatterData.map(d => {
       const catIdx = uniqueCatsArray.indexOf(d.category);
-      // Jitter range from -0.25 to +0.25 within the category column
       const jitter = (Math.random() - 0.5) * 0.5;
-      return {
-        ...d,
-        categoryIndex: catIdx + jitter,
-        categoryName: d.category // Preserved for tooltips
-      };
+      return { ...d, categoryIndex: catIdx + jitter, categoryName: d.category };
     });
     
-    // Sorted ascending so highest average minute categories appear at the TOP of the Recharts vertical BarChart
     const resSpeedBar = Array.from(catResMap.values())
       .map((c) => ({ category: String(c.category), avgMins: Math.round(c.sum / c.count) }))
-      .sort((a, b) => a.avgMins - b.avgMins); 
+      .sort((a, b) => b.avgMins - a.avgMins); 
       
     const wateringList = Array.from(wateringMap.entries())
       .map(([station, count]) => ({ station: String(station), count }))
@@ -701,12 +790,29 @@ export default function App() {
       week: Array.from(slaTrendMap.week.values()).sort((a, b) => a.date.localeCompare(b.date)).map(calcCompliance),
       month: Array.from(slaTrendMap.month.values()).sort((a, b) => a.date.localeCompare(b.date)).map(calcCompliance),
     };
+    
+    // Derived Global KPIs for Headers
+    const globalKpis = {
+       avgResTime: resolvedCount > 0 ? formatTime(Math.round(totalResTime / resolvedCount)) : '—',
+       slaBreachRate: validRecords.length > 0 ? ((slaBreachCount / validRecords.length) * 100).toFixed(1) : 0,
+       worstShift: shiftHeatmap.length > 0 ? shiftHeatmap.sort((a,b)=>b.Total - a.Total)[0].shift : '—',
+       openTickets: openCount,
+       wowChange: previous7DaysVol > 0 ? (((current7DaysVol - previous7DaysVol) / previous7DaysVol) * 100).toFixed(1) : 0,
+       peakComplaintDay: dailyTrendRaw.length > 0 ? dailyTrendRaw.sort((a,b)=>b.count - a.count)[0] : null,
+       avgSlaCompliance: validRecords.length > 0 ? (((validRecords.length - slaBreachCount) / validRecords.length) * 100).toFixed(1) : 0,
+       criticalPests: pestDefectTable.filter(r => r.isPest).length,
+       topBottleneckStation: wateringList.length > 0 ? wateringList[0].station : '—',
+       worstCoachClass: coachMatrix.length > 0 ? coachMatrix[0].coachType : '—',
+       fakeCloseRate: quickCloseData[0].Unsatisfactory || 0,
+       overallUnsat: totalRated > 0 ? ((totalUnsat / totalRated) * 100).toFixed(1) : 0,
+       topGrievance: wordCloud.length > 0 ? wordCloud[0].text : '—'
+    };
 
     return {
       kpis, kpisToday, sparklineArray, maxZoneDivValue, maxTrainCatValue, maxShiftVal, options: opt,
       trainMatrix, zoneDivMatrix, uniqueDivsArray, shiftHeatmap, scatterData: finalScatterData, resSpeedBar,
       wateringList, pestDefectTable, coachMatrix, unsatTable, quickCloseData, wordCloud,
-      uniqueCatsArray, validRecords,
+      uniqueCatsArray, validRecords, globalKpis,
       dailyTrend, weeklyTrend, monthlyTrend, categoryTrend, topCats, slaTrend
     };
   }, [dbData, filters]);
@@ -714,7 +820,7 @@ export default function App() {
   const {
     kpis, kpisToday, sparklineArray, maxZoneDivValue, maxTrainCatValue, maxShiftVal, options, trainMatrix, zoneDivMatrix, uniqueDivsArray, shiftHeatmap, scatterData, resSpeedBar,
     wateringList, pestDefectTable, coachMatrix, unsatTable, quickCloseData, wordCloud,
-    uniqueCatsArray, validRecords,
+    uniqueCatsArray, validRecords, globalKpis,
     dailyTrend, weeklyTrend, monthlyTrend, categoryTrend, topCats, slaTrend
   } = aggregated;
 
@@ -1156,13 +1262,32 @@ export default function App() {
           </div>
 
           {showFilters && (
-            <div className="px-4 md:px-8 py-4 bg-slate-50 dark:bg-slate-900/60 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 border-b border-slate-200 dark:border-slate-800 relative z-30">
+            <div className="px-4 md:px-8 py-4 bg-slate-50 dark:bg-slate-900/60 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4 border-b border-slate-200 dark:border-slate-800 relative z-30">
+              
+              <div className="col-span-2 flex items-end">
+                <div className="flex bg-slate-200 dark:bg-slate-800 rounded-lg p-1 border border-slate-300 dark:border-slate-700 w-full justify-between shadow-inner">
+                  {['Today', 'This Week', 'This Month', 'Overall'].map(preset => (
+                    <button
+                      key={preset}
+                      onClick={() => handleDatePreset(preset)}
+                      className={`flex-1 px-2 py-1.5 text-[10px] sm:text-xs font-bold rounded-md transition-all truncate ${
+                        datePreset === preset
+                          ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-white shadow-sm'
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="flex flex-col relative">
                 <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">From Date</span>
                 <div className="relative">
                   <div className="text-sm border border-slate-200 dark:border-slate-700 rounded p-1.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 flex items-center justify-between pointer-events-none">
-                     <span>{formatHumanDate(filters.fromDate)}</span>
-                     <Calendar className="w-4 h-4 text-slate-400" />
+                     <span className="truncate">{formatHumanDate(filters.fromDate)}</span>
+                     <Calendar className="w-4 h-4 text-slate-400 flex-shrink-0" />
                   </div>
                   <input type="date" value={filters.fromDate} onChange={(e) => updateFilter('fromDate', e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
                 </div>
@@ -1171,8 +1296,8 @@ export default function App() {
                 <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">To Date</span>
                 <div className="relative">
                   <div className="text-sm border border-slate-200 dark:border-slate-700 rounded p-1.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 flex items-center justify-between pointer-events-none">
-                     <span>{formatHumanDate(filters.toDate)}</span>
-                     <Calendar className="w-4 h-4 text-slate-400" />
+                     <span className="truncate">{formatHumanDate(filters.toDate)}</span>
+                     <Calendar className="w-4 h-4 text-slate-400 flex-shrink-0" />
                   </div>
                   <input type="date" value={filters.toDate} onChange={(e) => updateFilter('toDate', e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
                 </div>
@@ -1228,13 +1353,13 @@ export default function App() {
               {activeTab === 'executive' && (
                 <div className="space-y-8 animate-fade-in">
                   
-                  {/* KPI TILES (WITH DUAL METRICS & SPARKLINES) */}
+                  {/* KPI TILES */}
                   <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-6">
-                    <MetricCard title="Total Volume" value={kpis.total} todayValue={kpisToday.total} icon={Activity} accent="bg-indigo-600" sparkColor="#4f46e5" sparklineData={sparklineArray} dataKey="total" onTodayClick={handleTodayClick} />
-                    <MetricCard title="Bedroll" value={kpis.bedroll} todayValue={kpisToday.bedroll} icon={BedDouble} accent="bg-purple-600" sparkColor="#9333ea" sparklineData={sparklineArray} dataKey="bedroll" onTodayClick={handleTodayClick} />
-                    <MetricCard title="Cleanliness" value={kpis.clean} todayValue={kpisToday.clean} icon={Sparkles} accent="bg-emerald-600" sparkColor="#10b981" sparklineData={sparklineArray} dataKey="clean" onTodayClick={handleTodayClick} />
-                    <MetricCard title="Watering" value={kpis.water} todayValue={kpisToday.water} icon={Droplets} accent="bg-sky-600" sparkColor="#0284c7" sparklineData={sparklineArray} dataKey="water" onTodayClick={handleTodayClick} />
-                    <MetricCard title="Maintenance" value={kpis.maint} todayValue={kpisToday.maint} icon={Wrench} accent="bg-amber-600" sparkColor="#d97706" sparklineData={sparklineArray} dataKey="maint" onTodayClick={handleTodayClick} />
+                    <MetricCard title="Total Volume" value={kpis.total} todayValue={kpisToday.total} icon={Activity} accent="bg-indigo-600" sparkColor="#4f46e5" sparklineData={sparklineArray} dataKey="total" onTodayClick={() => handleDatePreset('Today')} />
+                    <MetricCard title="Bedroll" value={kpis.bedroll} todayValue={kpisToday.bedroll} icon={BedDouble} accent="bg-purple-600" sparkColor="#9333ea" sparklineData={sparklineArray} dataKey="bedroll" onTodayClick={() => handleDatePreset('Today')} />
+                    <MetricCard title="Cleanliness" value={kpis.clean} todayValue={kpisToday.clean} icon={Sparkles} accent="bg-emerald-600" sparkColor="#10b981" sparklineData={sparklineArray} dataKey="clean" onTodayClick={() => handleDatePreset('Today')} />
+                    <MetricCard title="Watering" value={kpis.water} todayValue={kpisToday.water} icon={Droplets} accent="bg-sky-600" sparkColor="#0284c7" sparklineData={sparklineArray} dataKey="water" onTodayClick={() => handleDatePreset('Today')} />
+                    <MetricCard title="Maintenance" value={kpis.maint} todayValue={kpisToday.maint} icon={Wrench} accent="bg-amber-600" sparkColor="#d97706" sparklineData={sparklineArray} dataKey="maint" onTodayClick={() => handleDatePreset('Today')} />
                   </div>
 
                   {/* VISUAL 1: MAJOR COMPLAINT GIVING TRAINS MATRIX */}
@@ -1330,6 +1455,15 @@ export default function App() {
               {/* TAB 2: OPERATIONS */}
               {activeTab === 'operations' && (
                 <div className="space-y-8 animate-fade-in">
+                  
+                  {/* KPI TILES FOR TAB 2 */}
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
+                    <MetricCard title="Avg Resolution Time" value={globalKpis.avgResTime} icon={Clock} accent="bg-blue-600" />
+                    <MetricCard title="SLA Breach Rate" value={`${globalKpis.slaBreachRate}%`} icon={AlertTriangle} accent="bg-rose-600" infoText="Percentage of tickets in this time range taking > 30 minutes to resolve." />
+                    <MetricCard title="Worst Shift" value={globalKpis.worstShift} icon={Moon} accent="bg-purple-600" />
+                    <MetricCard title="Pending / Open" value={globalKpis.openTickets} icon={Target} accent="bg-amber-600" />
+                  </div>
+
                   <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
                     <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60">
                       <h3 className="text-base font-bold text-slate-800 dark:text-white">2-Hourly Shift Heatmap</h3>
@@ -1427,26 +1561,25 @@ export default function App() {
               {/* TAB 3: TRENDS */}
               {activeTab === 'trends' && (
                 <div className="space-y-8 animate-fade-in">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-base font-bold text-slate-700 dark:text-slate-200">Trends Filter</h3>
-                    <div className="inline-flex bg-slate-100 dark:bg-slate-800 p-1 rounded-full border border-slate-200 dark:border-slate-700">
-                      {['day', 'week', 'month'].map((g) => {
-                        const label = g === 'day' ? 'Daily' : g.charAt(0).toUpperCase() + g.slice(1) + 'ly';
-                        return (
-                          <button
-                            key={g}
-                            onClick={() => setTrendsGranularity(g)}
-                            className={`px-4 py-1.5 text-xs font-bold rounded-full transition-all ${
-                              trendsGranularity === g
-                                ? 'bg-indigo-600 text-white shadow-md'
-                                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
+                  
+                  {/* KPI TILES FOR TAB 3 */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6">
+                    <MetricCard 
+                      title="WoW Volume Change" 
+                      value={Math.abs(globalKpis.wowChange) + '%'} 
+                      icon={TrendingUp} 
+                      accent={globalKpis.wowChange <= 0 ? 'bg-emerald-600' : 'bg-rose-600'} 
+                      extraIcon={globalKpis.wowChange <= 0 ? <ArrowDownRight className="w-6 h-6 text-emerald-500" /> : <ArrowUpRight className="w-6 h-6 text-rose-500" />}
+                      infoText="Total complaint volume of the last 7 days compared against the preceding 7 days."
+                    />
+                    <MetricCard 
+                      title="Peak Complaint Day" 
+                      value={globalKpis.peakComplaintDay ? globalKpis.peakComplaintDay.count : '0'} 
+                      todayValue={globalKpis.peakComplaintDay ? formatHumanDate(globalKpis.peakComplaintDay.key) : '—'}
+                      icon={Activity} 
+                      accent="bg-indigo-600" 
+                    />
+                    <MetricCard title="Avg SLA Compliance" value={`${globalKpis.avgSlaCompliance}%`} icon={CheckCircle} accent="bg-emerald-600" />
                   </div>
 
                   <Card title={`Complaint Volume Trend (${granularityLabel})`} icon={TrendingUp}>
@@ -1513,6 +1646,21 @@ export default function App() {
               {/* TAB 4: ASSETS */}
               {activeTab === 'assets' && (
                 <div className="space-y-8 animate-fade-in">
+                  
+                  {/* KPI TILES FOR TAB 4 */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6">
+                    <MetricCard 
+                      title="Critical Pest Alerts" 
+                      value={globalKpis.criticalPests} 
+                      icon={Bug} 
+                      accent="bg-rose-600" 
+                      isCritical={globalKpis.criticalPests > 0} 
+                      infoText="Total complaints containing severe health-hazard keywords (Cockroach, Rodent, Pest)." 
+                    />
+                    <MetricCard title="Top Bottleneck Station" value={globalKpis.topBottleneckStation} icon={LucideMap} accent="bg-sky-600" />
+                    <MetricCard title="Worst Coach Class" value={globalKpis.worstCoachClass} icon={TrainFront} accent="bg-purple-600" />
+                  </div>
+
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     <Card title="Territorial Watering Point Map">
                       <div className="h-[300px]">
@@ -1599,6 +1747,20 @@ export default function App() {
               {/* TAB 5: SENTIMENT */}
               {activeTab === 'sentiment' && (
                 <div className="space-y-8 animate-fade-in">
+                  
+                  {/* KPI TILES FOR TAB 5 */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6">
+                    <MetricCard 
+                      title='"Fake Close" Rate' 
+                      value={`${globalKpis.fakeCloseRate}%`} 
+                      icon={AlertTriangle} 
+                      accent="bg-rose-600" 
+                      infoText="Percentage of tickets closed in under 15 minutes that resulted in an 'Unsatisfactory' passenger rating."
+                    />
+                    <MetricCard title="Overall Unsatisfactory" value={`${globalKpis.overallUnsat}%`} icon={ThumbsDown} accent="bg-orange-600" />
+                    <MetricCard title="Top Passenger Grievance" value={globalKpis.topGrievance} icon={MessageSquareWarning} accent="bg-indigo-600" />
+                  </div>
+
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm h-[400px] overflow-hidden flex flex-col">
                       <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-4">Sentiment Word Cloud</h3>
@@ -1668,6 +1830,66 @@ export default function App() {
                         </table>
                       </div>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 6: DATA DICTIONARY */}
+              {activeTab === 'dictionary' && (
+                <div className="space-y-8 animate-fade-in">
+                  <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
+                    <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex items-center">
+                      <BookOpen className="w-5 h-5 text-indigo-600 mr-2" />
+                      <h3 className="text-base font-bold text-slate-800 dark:text-white">Data Dictionary & Glossary</h3>
+                    </div>
+                    <div className="overflow-x-auto custom-scrollbar">
+                      <table className="min-w-full text-left border-collapse">
+                        <thead className="bg-white dark:bg-slate-900">
+                          <tr className="text-slate-400 dark:text-slate-500 text-[10px] uppercase tracking-widest border-b border-slate-100 dark:border-slate-800">
+                            <th className="p-4 font-bold w-1/4">Metric / Chart Name</th>
+                            <th className="p-4 font-bold w-1/3">Definition</th>
+                            <th className="p-4 font-bold">Calculation Logic / SLA Rule</th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-sm text-slate-700 dark:text-slate-300 divide-y divide-slate-100 dark:divide-slate-800">
+                          <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
+                            <td className="p-4 font-bold text-slate-900 dark:text-white">SLA Compliance Trend</td>
+                            <td className="p-4 text-slate-600 dark:text-slate-400">Tracks the daily proportion of tickets resolved within the target timeframe.</td>
+                            <td className="p-4 font-mono text-xs text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-900/10">Resolution Time ≤ 30 mins = On Time (Green)</td>
+                          </tr>
+                          <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
+                            <td className="p-4 font-bold text-slate-900 dark:text-white">Sentiment Word Cloud</td>
+                            <td className="p-4 text-slate-600 dark:text-slate-400">Highlights the most frequent passenger-generated nouns and adjectives.</td>
+                            <td className="p-4 font-mono text-xs text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-900/10">Excludes standard stop-words and 'AI Generated Complaint Description'</td>
+                          </tr>
+                          <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
+                            <td className="p-4 font-bold text-slate-900 dark:text-white">Territorial Watering Map</td>
+                            <td className="p-4 text-slate-600 dark:text-slate-400">Identifies stations causing cascading watering shortages.</td>
+                            <td className="p-4 font-mono text-xs text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-900/10">Filtered strictly where compTypeName = 'Watering'</td>
+                          </tr>
+                          <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
+                            <td className="p-4 font-bold text-slate-900 dark:text-white">"Fake Close" Rate</td>
+                            <td className="p-4 text-slate-600 dark:text-slate-400">Percentage of tickets closed suspiciously fast that still resulted in passenger dissatisfaction.</td>
+                            <td className="p-4 font-mono text-xs text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-900/10">(Unsatisfactory &lt; 15m) / (Total &lt; 15m) * 100</td>
+                          </tr>
+                          <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
+                            <td className="p-4 font-bold text-slate-900 dark:text-white">WoW Volume Change</td>
+                            <td className="p-4 text-slate-600 dark:text-slate-400">Week-over-week percentage shift in total complaint volume.</td>
+                            <td className="p-4 font-mono text-xs text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-900/10">((Current 7 Days - Prev 7 Days) / Prev 7 Days) * 100</td>
+                          </tr>
+                          <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
+                            <td className="p-4 font-bold text-slate-900 dark:text-white">Critical Pest Alerts</td>
+                            <td className="p-4 text-slate-600 dark:text-slate-400">Total volume of hygiene complaints containing severe health-hazard keywords.</td>
+                            <td className="p-4 font-mono text-xs text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-900/10">LIKE '%Cockroach%' OR '%Rodent%' OR '%Pest%'</td>
+                          </tr>
+                          <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
+                            <td className="p-4 font-bold text-slate-900 dark:text-white">Avg Resolution Time</td>
+                            <td className="p-4 text-slate-600 dark:text-slate-400">Global average time elapsed from ticket creation to final closure status.</td>
+                            <td className="p-4 font-mono text-xs text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-900/10">AVG(Disposal Time Difference in Minutes)</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               )}
