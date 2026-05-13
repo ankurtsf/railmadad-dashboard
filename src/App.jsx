@@ -10,11 +10,14 @@ import {
   Upload, Bot, Calendar, Trash2, Cpu
 } from 'lucide-react';
 
-// --- PRODUCTION IMPORTS ---
+// ============================================================================
+// ⚠️ PRODUCTION IMPORTS (Uncomment these 2 lines in VS Code!) ⚠️
 // import { createClient } from '@supabase/supabase-js';
 // import * as XLSX from 'xlsx';
+// ============================================================================
 
-// --- LOCAL PREVIEW MOCKS ---
+// ============================================================================
+// ⚠️ LOCAL PREVIEW MOCKS (DELETE THIS ENTIRE BLOCK IN VS CODE!) ⚠️
 const createClient = () => ({
   from: () => ({
     select: () => ({ eq: () => ({ single: async () => ({ data: null, error: null }) }) }),
@@ -24,6 +27,7 @@ const createClient = () => ({
   removeChannel: () => {}
 });
 const XLSX = { read: () => ({ SheetNames: [], Sheets: {} }), utils: { sheet_to_json: () => [] } };
+// ============================================================================
 
 // --- SUPABASE CONFIG ---
 const supabaseUrl = 'https://npfuxifktdmxmzprfcxm.supabase.co';
@@ -38,37 +42,12 @@ const iconMap = {
   AlertTriangle: AlertTriangle
 };
 
-// --- DATE-BASED DATABASE ---
+// --- EMPTY INITIAL DATABASE ---
 const initialRawDatabase = {
-  records: [
-    {
-      date: '2025-05-10',
-      kpis: { total: 245, resolved: 98.2, time: 65, unsat: 3.1 },
-      categories: { 'Cleanliness': 85, 'Bedroll': 60, 'Watering': 45, 'Maintenance': 35, 'Staff Behavior': 20 },
-      trains: { '12557 (MFP-ANVT)': { c: 20, a: 15, u: 5 }, '02563 (BJU-NDLS)': { c: 15, a: 5, u: 10 } },
-      shifts: { '08:00 - 12:00': { c: 40, r: 38 }, '12:00 - 16:00': { c: 30, r: 28 } },
-      feedback: [{ id: '2025051001', train: '12557', head: 'Cleanliness', desc: 'Coach dirty since start', rootCause: 'Missed at origin', avoidable: 'Yes' }]
-    },
-    {
-      date: '2025-05-11',
-      kpis: { total: 280, resolved: 97.5, time: 72, unsat: 4.5 },
-      categories: { 'Cleanliness': 110, 'Bedroll': 75, 'Watering': 50, 'Maintenance': 30, 'Staff Behavior': 15 },
-      trains: { '12557 (MFP-ANVT)': { c: 25, a: 18, u: 7 }, '12558 (ANVT-MFP)': { c: 20, a: 15, u: 5 } },
-      shifts: { '08:00 - 12:00': { c: 50, r: 45 }, '16:00 - 20:00': { c: 35, r: 30 } },
-      feedback: [{ id: '2025051101', train: '12558', head: 'Watering', desc: 'No water in toilet', rootCause: 'Hydrant low pressure', avoidable: 'No' }]
-    },
-    {
-      date: '2025-05-12',
-      kpis: { total: 210, resolved: 99.1, time: 55, unsat: 2.0 },
-      categories: { 'Cleanliness': 70, 'Bedroll': 50, 'Watering': 40, 'Maintenance': 40, 'Staff Behavior': 10 },
-      trains: { '15228 (MFP-SMVB)': { c: 30, a: 25, u: 5 }, '02563 (BJU-NDLS)': { c: 10, a: 2, u: 8 } },
-      shifts: { '04:00 - 08:00': { c: 20, r: 19 }, '20:00 - 24:00': { c: 25, r: 25 } },
-      feedback: []
-    }
-  ]
+  records: [] // Start completely empty!
 };
 
-// Aggregation Engine
+// Aggregation Engine: Combines daily records into a single view based on selected dates
 const aggregateData = (records, fromDate, toDate) => {
   const filtered = (records || []).filter(r => r.date >= fromDate && r.date <= toDate);
   if (filtered.length === 0) return null;
@@ -109,9 +88,9 @@ const aggregateData = (records, fromDate, toDate) => {
     kpis: {
       total,
       prev: 0, 
-      resolved: (resolvedSum / count).toFixed(1),
-      time: Math.round(timeSum / count) + 'm',
-      unsat: (unsatSum / count).toFixed(1)
+      resolved: count > 0 ? (resolvedSum / count).toFixed(1) : 0,
+      time: count > 0 ? Math.round(timeSum / count) + 'm' : '0m',
+      unsat: count > 0 ? (unsatSum / count).toFixed(1) : 0
     },
     categories: Object.entries(cats).map(([name, value]) => ({
       name, value,
@@ -119,7 +98,7 @@ const aggregateData = (records, fromDate, toDate) => {
       icon: name === 'Cleanliness' ? 'Sparkles' : name === 'Bedroll' ? 'BedSingle' : name === 'Watering' ? 'Droplets' : name === 'Maintenance' ? 'Wrench' : 'AlertTriangle'
     })).sort((a,b) => b.value - a.value),
     trains: Object.entries(trains).map(([train, v]) => ({
-      train, complaints: v.c, rate: (v.c / count).toFixed(2), avoidable: v.a, unavoidable: v.u
+      train, complaints: v.c, rate: count > 0 ? (v.c / count).toFixed(2) : 0, avoidable: v.a, unavoidable: v.u
     })).sort((a,b) => b.complaints - a.complaints),
     shifts: Object.entries(shifts).map(([shift, v]) => ({
       shift, complaints: v.c, resolvedOnTime: v.r
@@ -182,10 +161,13 @@ export default function App() {
   const [lastSync, setLastSync] = useState('Just now');
   const [dbData, setDbData] = useState(initialRawDatabase);
   
-  // Timeline Filters
-  const [fromDate, setFromDate] = useState('2025-05-10');
-  const [toDate, setToDate] = useState('2025-05-12');
-  const [fallbackDate, setFallbackDate] = useState(new Date().toISOString().split('T')[0]);
+  // Timeline Filters (Default to last 7 days)
+  const todayStr = new Date().toISOString().split('T')[0];
+  const lastWeekStr = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  
+  const [fromDate, setFromDate] = useState(lastWeekStr);
+  const [toDate, setToDate] = useState(todayStr);
+  const [fallbackDate, setFallbackDate] = useState(todayStr);
   
   const [toastMessage, setToastMessage] = useState('');
   const [showResetModal, setShowResetModal] = useState(false);
@@ -195,6 +177,7 @@ export default function App() {
     setTimeout(() => setToastMessage(''), 5000);
   };
 
+  // Fetch initial data
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
@@ -267,14 +250,14 @@ export default function App() {
              
              if (dateCol) {
                 // -------------------------------------------------------------
-                // 1. SMART EXTRACTION: Found dates, parse row by row
+                // 1. SMART EXTRACTION: Found dates, group row by row
                 // -------------------------------------------------------------
                 const groupedByDate = {};
                 const catCol = headers.find(h => h.toLowerCase().includes('category') || h.toLowerCase().includes('head'));
                 
                 jsonObjects.forEach(row => {
                    const dateStr = extractDateFromExcel(row[dateCol]);
-                   if (!dateStr) return; // Skip invalid rows
+                   if (!dateStr) return; // Skip rows without valid date
                    
                    if (!groupedByDate[dateStr]) {
                        groupedByDate[dateStr] = { total: 0, categories: { 'Cleanliness':0, 'Bedroll':0, 'Watering':0, 'Maintenance':0, 'Staff Behavior':0 } };
@@ -297,7 +280,6 @@ export default function App() {
                    }
                 });
 
-                // Append the grouped daily summaries to our database
                 const datesAppended = [];
                 Object.entries(groupedByDate).forEach(([dStr, groupData]) => {
                     const newRecord = {
@@ -316,7 +298,7 @@ export default function App() {
 
              } else {
                 // -------------------------------------------------------------
-                // 2. FALLBACK EXTRACTION: No date column, use manual fallbackDate
+                // 2. FALLBACK EXTRACTION: No date column, parse entire sheet
                 // -------------------------------------------------------------
                 const newRecord = {
                   date: fallbackDate,
@@ -326,19 +308,51 @@ export default function App() {
                 };
 
                 const jsonDataArray = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) || [];
-                const totalRow = jsonDataArray.find(row => row && row[1] === 'Total');
-                if (totalRow) newRecord.kpis.total = parseInt(totalRow[3], 10) || 0;
+                
+                // Helper to safely find numbers next to keywords in unstructured sheets
+                const findVal = (keyword) => {
+                  const row = jsonDataArray.find(r => r && r.some(c => String(c).toLowerCase().includes(keyword.toLowerCase())));
+                  if (!row) return 0;
+                  const idx = row.findIndex(c => String(c).toLowerCase().includes(keyword.toLowerCase()));
+                  for(let i=idx+1; i<row.length; i++) {
+                      const num = parseInt(row[i], 10);
+                      if (!isNaN(num)) return num;
+                  }
+                  return 0;
+                };
 
-                ['Cleanliness', 'Bedroll', 'Watering', 'Maintenance', 'Staff Behavior'].forEach(cat => {
-                   const catRow = jsonDataArray.find(r => r && r[1] === cat);
-                   if (catRow) newRecord.categories[cat] = parseInt(catRow[3], 10) || 0;
-                });
+                const summaryTotal = findVal('total');
+                
+                if (summaryTotal > 0) {
+                    newRecord.kpis.total = summaryTotal;
+                    newRecord.categories['Cleanliness'] = findVal('clean');
+                    newRecord.categories['Bedroll'] = findVal('bed');
+                    newRecord.categories['Watering'] = findVal('water');
+                    newRecord.categories['Maintenance'] = findVal('maintain');
+                    newRecord.categories['Staff Behavior'] = findVal('staff');
+                } else {
+                    // It's a raw list, but missing the Date column. Count the rows.
+                    newRecord.kpis.total = Math.max(0, jsonDataArray.length - 1);
+                    
+                    const catIdx = (jsonDataArray[0] || []).findIndex(h => String(h).toLowerCase().includes('category') || String(h).toLowerCase().includes('head'));
+                    if (catIdx !== -1) {
+                        for(let i=1; i<jsonDataArray.length; i++) {
+                            if(!jsonDataArray[i]) continue;
+                            const cat = String(jsonDataArray[i][catIdx]).toLowerCase();
+                            if (cat.includes('clean')) newRecord.categories['Cleanliness']++;
+                            else if (cat.includes('bed') || cat.includes('linen')) newRecord.categories['Bedroll']++;
+                            else if (cat.includes('water')) newRecord.categories['Watering']++;
+                            else if (cat.includes('maintain') || cat.includes('repair')) newRecord.categories['Maintenance']++;
+                            else if (cat.includes('staff') || cat.includes('behav')) newRecord.categories['Staff Behavior']++;
+                        }
+                    }
+                }
 
                 const existingIndex = newData.records.findIndex(r => r.date === fallbackDate);
                 if (existingIndex >= 0) newData.records[existingIndex] = newRecord;
                 else newData.records.push(newRecord);
 
-                showToast(`Appended summarized data for manually selected date: ${fallbackDate}.`);
+                showToast(`Appended data for fallback date: ${fallbackDate}. Total cases: ${newRecord.kpis.total}`);
              }
            }
         }
@@ -366,13 +380,13 @@ export default function App() {
     setShowResetModal(false);
     showToast("Resetting database...");
     try {
-      setDbData(initialRawDatabase);
+      setDbData(initialRawDatabase); // Empty state
       const { error } = await supabase.from('railmadad_sync').update({ 
           json_data: initialRawDatabase, 
           last_updated: new Date().toISOString() 
       }).eq('id', 1);
       if (error) throw error;
-      showToast("Database successfully reset to default.");
+      showToast("Database successfully wiped clean.");
     } catch (err) {
       showToast("Error resetting database.");
     }
@@ -391,21 +405,21 @@ export default function App() {
 
       {/* Hard Reset Modal */}
       {showResetModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-2xl shadow-xl max-w-sm w-full mx-4 border border-slate-100">
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-6 rounded-2xl shadow-xl max-w-sm w-full border border-slate-100">
             <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mb-4">
               <AlertTriangle className="w-6 h-6" />
             </div>
-            <h3 className="text-xl font-bold text-slate-800 mb-2">Hard Reset Data?</h3>
+            <h3 className="text-xl font-bold text-slate-800 mb-2">Wipe Database?</h3>
             <p className="text-sm text-slate-500 mb-6 leading-relaxed">
-              This will clear all appended daily reports and reset the dashboard to its initial state. This action cannot be undone.
+              This will permanently delete all appended daily reports. The dashboard will return to a completely empty state.
             </p>
             <div className="flex space-x-3">
               <button onClick={() => setShowResetModal(false)} className="flex-1 py-2.5 rounded-lg border border-slate-200 text-slate-600 font-semibold text-sm hover:bg-slate-50 transition-colors">
                 Cancel
               </button>
               <button onClick={executeHardReset} className="flex-1 py-2.5 rounded-lg bg-rose-600 text-white font-semibold text-sm hover:bg-rose-700 transition-colors shadow-sm shadow-rose-200">
-                Yes, Reset
+                Yes, Wipe Data
               </button>
             </div>
           </div>
@@ -431,12 +445,12 @@ export default function App() {
              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Append Data</p>
            </div>
            
-           <div className="mb-4 bg-white p-3 rounded-lg border border-slate-200">
+           <div className="mb-4 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block leading-snug">
                Fallback Date<br/>
-               <span className="text-slate-400 font-normal normal-case text-[9px]">(If Excel has no "Created On" column)</span>
+               <span className="text-slate-400 font-normal normal-case text-[9px]">(Only used if Excel lacks a Date column)</span>
              </label>
-             <input type="date" value={fallbackDate} onChange={e => setFallbackDate(e.target.value)} className="w-full text-sm border-none bg-slate-50 rounded px-2 py-1.5 text-slate-700 outline-none" />
+             <input type="date" value={fallbackDate} onChange={e => setFallbackDate(e.target.value)} className="w-full text-sm border-none bg-slate-50 rounded px-2 py-1.5 text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer" />
            </div>
 
            <label className="flex items-center justify-center w-full px-4 py-2.5 bg-indigo-600 text-white rounded-lg shadow-sm hover:bg-indigo-700 cursor-pointer transition-colors active:scale-95">
@@ -480,7 +494,7 @@ export default function App() {
            </button>
            <div className="flex items-center justify-center opacity-60 hover:opacity-100 transition-opacity">
              <Cpu className="w-4 h-4 text-indigo-600 mr-2" />
-             <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Powered by Neural Mesh</span>
+             <span className="text-[11px] font-black uppercase tracking-widest text-slate-600">Powered by Neural Mesh</span>
            </div>
         </div>
       </aside>
@@ -496,19 +510,19 @@ export default function App() {
         </header>
 
         {/* Global Filter Bar (Timeline) */}
-        <div className="bg-white border-b border-slate-200 px-4 md:px-8 py-4 flex flex-col lg:flex-row justify-between items-start lg:items-center space-y-4 lg:space-y-0 z-20 sticky top-0 md:top-0">
+        <div className="bg-white border-b border-slate-200 px-4 md:px-8 py-4 flex flex-col lg:flex-row justify-between items-start lg:items-center space-y-4 lg:space-y-0 z-20 sticky top-0 md:top-0 shadow-sm">
            <h2 className="text-xl font-bold text-slate-800">
              {navItems.find(i => i.id === activeTab)?.label}
            </h2>
            <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4 bg-slate-50 border border-slate-200 p-2 rounded-xl">
               <div className="flex items-center text-sm">
-                 <Calendar className="w-4 h-4 text-slate-400 mr-2 shrink-0" />
+                 <Calendar className="w-4 h-4 text-indigo-500 mr-2 shrink-0" />
                  <span className="font-bold text-slate-600 mr-2 text-xs uppercase tracking-wider">From</span>
-                 <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="bg-white border border-slate-200 rounded px-2 py-1 text-slate-700 outline-none focus:border-indigo-500" />
+                 <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="bg-white border border-slate-200 rounded px-2 py-1 text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer" />
               </div>
               <div className="flex items-center text-sm">
                  <span className="font-bold text-slate-600 mx-2 text-xs uppercase tracking-wider">To</span>
-                 <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="bg-white border border-slate-200 rounded px-2 py-1 text-slate-700 outline-none focus:border-indigo-500" />
+                 <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="bg-white border border-slate-200 rounded px-2 py-1 text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer" />
               </div>
            </div>
         </div>
@@ -516,7 +530,7 @@ export default function App() {
         <div className="p-4 md:p-8 flex-1 overflow-y-auto space-y-6">
 
           {/* AI INSIGHTS PANEL */}
-          {activeTab === 'overview' && (
+          {activeTab === 'overview' && currentData && (
             <div className="bg-gradient-to-r from-indigo-50 to-blue-50 border border-indigo-100 rounded-xl p-5 shadow-sm">
                <div className="flex items-center mb-4">
                   <div className="bg-indigo-600 p-2 rounded-lg mr-3 shadow-md shadow-indigo-200">
@@ -537,10 +551,16 @@ export default function App() {
 
           {/* NO DATA STATE */}
           {!currentData && (
-             <div className="bg-white p-12 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-center">
-               <Calendar className="w-12 h-12 text-slate-300 mb-4" />
-               <h3 className="text-xl font-bold text-slate-800">No Data for Selected Dates</h3>
-               <p className="text-slate-500 mt-2 max-w-sm">There are no reports available between {fromDate} and {toDate}. Adjust the timeline filter or upload new data.</p>
+             <div className="bg-white p-12 mt-10 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-center max-w-2xl mx-auto">
+               <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center mb-6">
+                 <Upload className="w-10 h-10 text-indigo-300" />
+               </div>
+               <h3 className="text-2xl font-bold text-slate-800">No Data Available</h3>
+               <p className="text-slate-500 mt-3 max-w-md leading-relaxed">
+                 The database is currently empty for the selected dates ({fromDate} to {toDate}). 
+                 <br/><br/>
+                 Upload your DRM Daily Summary Excel files using the sidebar to populate the dashboard.
+               </p>
              </div>
           )}
 
