@@ -992,6 +992,9 @@ export default function App() {
 
   const axisStyle = { fontSize: 11, fill: theme === 'dark' ? '#94a3b8' : '#64748b' };
   const gridStroke = theme === 'dark' ? '#1e293b' : '#f1f5f9';
+  
+  // Calculate dynamic max specifically for the watering heatmap scaling
+  const maxWateringVal = wateringList.length > 0 ? Math.max(...wateringList.map(w => w.count)) : 1;
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col md:flex-row font-sans text-slate-900 dark:text-slate-100 relative transition-colors">
@@ -1502,21 +1505,29 @@ export default function App() {
                             <XAxis type="number" axisLine={false} tickLine={false} tick={axisStyle} />
                             <YAxis dataKey="station" type="category" axisLine={false} tickLine={false} tick={axisStyle} dx={-10} />
                             <Tooltip cursor={{ fill: theme === 'dark' ? '#1e293b' : '#f8fafc' }} />
-                            <Bar dataKey="count" name="Watering Cases" fill="#0ea5e9" radius={[0, 6, 6, 0]} barSize={20} />
+                            <Bar dataKey="count" name="Watering Cases" radius={[0, 6, 6, 0]} barSize={20}>
+                               {wateringList.map((entry, index) => {
+                                  const { bg } = getHeatmapColor(entry.count, maxWateringVal, 'red');
+                                  return <Cell key={`cell-${index}`} fill={bg} />;
+                               })}
+                            </Bar>
                           </BarChart>
                         </ResponsiveContainer>
                       </div>
                     </Card>
 
-                    <Card title="Asset Health (Coach Type vs Total)">
+                    <Card title="Asset Health (Coach Type vs Category)">
                       <div className="h-[300px]">
                         <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={coachMatrix} layout="vertical" margin={{ left: 40, right: 20 }}>
+                          <BarChart data={coachMatrix.slice(0, 15)} layout="vertical" margin={{ left: 40, right: 20, bottom: 20 }}>
                             <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={gridStroke} />
                             <XAxis type="number" axisLine={false} tickLine={false} tick={axisStyle} />
                             <YAxis dataKey="coachType" type="category" axisLine={false} tickLine={false} tick={axisStyle} dx={-10} />
                             <Tooltip cursor={{ fill: theme === 'dark' ? '#1e293b' : '#f8fafc' }} />
-                            <Bar dataKey="Total" name="Total" fill="#f59e0b" radius={[0, 6, 6, 0]} barSize={20} />
+                            <Legend verticalAlign="bottom" height={36} wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+                            {topCats.map((cat, i) => (
+                              <Bar key={String(cat)} dataKey={String(cat)} name={String(cat)} stackId="a" fill={COLORS[i % COLORS.length]} barSize={20} />
+                            ))}
                           </BarChart>
                         </ResponsiveContainer>
                       </div>
@@ -1536,6 +1547,7 @@ export default function App() {
                           <thead className="sticky top-0 bg-white dark:bg-slate-900 shadow-sm z-10">
                             <tr className="text-slate-400 dark:text-slate-500 text-[10px] uppercase tracking-widest border-b border-slate-100 dark:border-slate-800">
                               <th className="p-4 font-bold">Ref No</th>
+                              <th className="p-4 font-bold">Date</th>
                               <th className="p-4 font-bold">Coach</th>
                               <th className="p-4 font-bold">Train</th>
                               <th className="p-4 font-bold">Sub-Category & Desc.</th>
@@ -1543,13 +1555,16 @@ export default function App() {
                           </thead>
                           <tbody className="text-sm text-slate-700 dark:text-slate-300 divide-y divide-slate-100 dark:divide-slate-800">
                             {pestDefectTable.map((row, idx) => (
-                              <tr key={idx} className="hover:bg-rose-50/50 dark:hover:bg-rose-950/20">
+                              <tr key={idx} className={`hover:bg-rose-50/50 dark:hover:bg-rose-950/20 ${row.isPest ? 'bg-rose-50/30 dark:bg-rose-900/10' : ''}`}>
                                 <td className="p-4 font-mono text-[10px] text-slate-400">{row.id}</td>
+                                <td className="p-4 font-bold text-slate-700 dark:text-slate-300 whitespace-nowrap">{row.date}</td>
                                 <td className="p-4 font-bold whitespace-nowrap text-indigo-700 dark:text-indigo-300">{row.coachType} - {row.coachNo}</td>
                                 <td className="p-4 font-bold text-slate-700 dark:text-slate-200">{row.train}</td>
                                 <td className="p-4 text-slate-600 dark:text-slate-400 max-w-md">
-                                  <span className="font-semibold text-rose-800 dark:text-rose-300">{row.subType || 'Unclassified'}</span>
-                                  <br /><span className="text-xs">{row.desc}</span>
+                                  <span className={`font-semibold ${row.isPest ? 'inline-block bg-rose-600 text-white px-2 py-0.5 rounded shadow-sm mb-1' : 'text-rose-800 dark:text-rose-300'}`}>
+                                    {row.subType || 'Unclassified'} {row.isPest && ' (PEST FLAG)'}
+                                  </span>
+                                  <br /><span className={`text-xs ${row.isPest ? 'text-rose-600 dark:text-rose-400 font-bold' : ''}`}>{row.desc}</span>
                                 </td>
                               </tr>
                             ))}
