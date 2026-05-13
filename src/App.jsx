@@ -23,11 +23,12 @@ const COLORS = ['#6366f1', '#8b5cf6', '#0ea5e9', '#f59e0b', '#ef4444', '#10b981'
 // Initial empty database
 const initialRawDatabase = { records: [] };
 
-// Word cloud stopwords
+// Word cloud stopwords (Added boilerplate AI/system terms)
 const STOP_WORDS = new Set([
   'and', 'the', 'was', 'for', 'that', 'with', 'from', 'this', 'have', 'not',
   'are', 'but', 'has', 'had', 'been', 'very', 'they', 'will', 'coach', 'train',
-  'seat', 'berth', 'number', 'passenger', 'is', 'it', 'to', 'in', 'of', 'on'
+  'seat', 'berth', 'number', 'passenger', 'is', 'it', 'to', 'in', 'of', 'on',
+  'ai', 'generated', 'complaint', 'description', 'user', 'input'
 ]);
 
 // ──────────────────────────────────────────────────────────────────
@@ -649,7 +650,18 @@ export default function App() {
       .map(([station, count]) => ({ station: String(station), count }))
       .sort((a, b) => b.count - a.count).slice(0, 15);
     const coachMatrix = Array.from(coachCatMap.values()).sort((a, b) => b.Total - a.Total);
-    const quickCloseData = [quickCloseMap['< 15m'], quickCloseMap['15-60m'], quickCloseMap['> 60m']];
+    
+    // Calculate 100% Stacked Bar Data for Quick Close
+    const quickCloseData = [quickCloseMap['< 15m'], quickCloseMap['15-60m'], quickCloseMap['> 60m']].map(bucket => {
+      const total = bucket.Satisfactory + bucket.Neutral + bucket.Unsatisfactory;
+      return {
+        name: bucket.name,
+        Satisfactory: total ? Number(((bucket.Satisfactory / total) * 100).toFixed(1)) : 0,
+        Neutral: total ? Number(((bucket.Neutral / total) * 100).toFixed(1)) : 0,
+        Unsatisfactory: total ? Number(((bucket.Unsatisfactory / total) * 100).toFixed(1)) : 0,
+      };
+    });
+
     const wordCloud = Array.from(wordMap.entries())
       .map(([text, value]) => ({ text: String(text), value }))
       .sort((a, b) => b.value - a.value).slice(0, 40)
@@ -1595,14 +1607,14 @@ export default function App() {
                       </div>
                     </div>
 
-                    <Card title='"Quick Close" Audit — Resolution Time vs Satisfaction'>
+                    <Card title='"Quick Close" Audit — Resolution Time vs Satisfaction (%)'>
                       <div className="h-[340px]">
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart data={quickCloseData} margin={{ left: 0, right: 20, bottom: 20 }}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={gridStroke} />
                             <XAxis dataKey="name" axisLine={false} tickLine={false} tick={axisStyle} dy={10} />
-                            <YAxis axisLine={false} tickLine={false} tick={axisStyle} />
-                            <Tooltip cursor={{ fill: theme === 'dark' ? '#1e293b' : '#f8fafc' }} />
+                            <YAxis axisLine={false} tickLine={false} tick={axisStyle} tickFormatter={(tick) => `${tick}%`} domain={[0, 100]} />
+                            <Tooltip cursor={{ fill: theme === 'dark' ? '#1e293b' : '#f8fafc' }} formatter={(val) => `${val}%`} />
                             <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: '12px' }} />
                             <Bar dataKey="Satisfactory" stackId="a" fill="#10b981" barSize={40} />
                             <Bar dataKey="Neutral" stackId="a" fill="#cbd5e1" barSize={40} />
@@ -1627,6 +1639,7 @@ export default function App() {
                             <tr className="text-slate-400 dark:text-slate-500 text-[10px] uppercase tracking-widest border-b border-slate-100 dark:border-slate-800">
                               <th className="p-4 font-bold">Ref No.</th>
                               <th className="p-4 font-bold">Train</th>
+                              <th className="p-4 font-bold">Disposal Time</th>
                               <th className="p-4 font-bold">Passenger Desc & Feedback</th>
                               <th className="p-4 font-bold">Closing Remarks</th>
                             </tr>
@@ -1636,6 +1649,7 @@ export default function App() {
                               <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                                 <td className="p-4 font-mono text-[10px] text-slate-400 whitespace-nowrap">{row.id}</td>
                                 <td className="p-4 font-bold text-slate-800 dark:text-white whitespace-nowrap">{row.train}</td>
+                                <td className="p-4 font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">{row.resTimeMins} mins</td>
                                 <td className="p-4 text-xs max-w-sm">
                                   <span className="text-slate-600 dark:text-slate-400">{row.desc}</span>
                                   {row.feedbackRemark && (
