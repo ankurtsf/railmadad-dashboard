@@ -14,13 +14,19 @@ const COLORS = ['#3b82f6', '#8b5cf6', '#0ea5e9', '#f59e0b', '#ef4444', '#10b981'
 // Strictly empty initial state.
 const initialRawDatabase = { records: [] };
 
-// --- STRICT RAW DATA PARSERS ---
+// --- STABLE RAW DATA PARSERS ---
+
+/**
+ * Parses exact RailMadad Date Format: "22-05-25 22:51"
+ */
 const parseRawDate = (raw) => {
     if (!raw) return null;
     const str = String(raw).trim();
+    
+    // Ignore pure floats (PNRs / Reference Numbers)
     if (/^\d+\.\d+$/.test(str)) return null; 
 
-    // Excel serial number conversion
+    // Handle Excel serial number conversion if needed
     if (!isNaN(raw) && typeof raw === 'number' && raw > 40000 && raw < 50000) {
         const d = new Date(Math.round((raw - 25569) * 86400 * 1000));
         return {
@@ -60,9 +66,11 @@ const getShift = (hour) => {
     return '00:00 - 08:00';
 };
 
-// Converts "1:16" to 76 minutes
+/**
+ * Converts "1:16" to total minutes (76)
+ */
 const parseResolutionTime = (val) => {
-    if (!val) return 0;
+    if (!val || val === "null") return 0;
     const match = String(val).match(/(\d+):(\d+)/);
     if (match) return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
     return 0;
@@ -101,7 +109,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [lastSync, setLastSync] = useState('Checking...');
+  const [lastSync, setLastSync] = useState('Checking Cloud...');
   const [dbData, setDbData] = useState(initialRawDatabase);
   const [supabaseClient, setSupabaseClient] = useState(null);
 
@@ -122,7 +130,7 @@ export default function App() {
     setTimeout(() => setToastMessage(''), 6000);
   };
 
-  // 1. Inject Dependencies Dynamically (Avoids Canvas Build Errors)
+  // 1. Inject Dependencies Dynamically
   useEffect(() => {
     const loadDependencies = async () => {
       try {
@@ -153,28 +161,38 @@ export default function App() {
     loadDependencies();
   }, []);
 
-  // 2. Fetch Data from Supabase (Persistence)
-  useEffect(() => {
+  // 2. Fetch Data from Supabase (Persistent State)
+  const fetchCloudData = async () => {
     if (!supabaseClient) return;
-
-    const fetchInitialData = async () => {
-      try {
-        const { data, error } = await supabaseClient.from('railmadad_sync').select('*').eq('id', 1).single();
-        if (data && data.json_data && data.json_data.records) {
-          setDbData(data.json_data);
-          setLastSync(new Date(data.last_updated || Date.now()).toLocaleTimeString());
-          if (data.json_data.records.length > 0) {
+    try {
+      const { data, error } = await supabaseClient.from('railmadad_sync').select('*').eq('id', 1).single();
+      if (error) {
+          // If row 1 doesn't exist, create it
+          if (error.code === 'PGRST116') {
+              await supabaseClient.from('railmadad_sync').insert([{ id: 1, json_data: initialRawDatabase }]);
+          }
+          setLastSync("Empty");
+          return;
+      }
+      if (data && data.json_data && data.json_data.records) {
+        setDbData(data.json_data);
+        setLastSync(new Date(data.last_updated || Date.now()).toLocaleTimeString());
+        
+        // Only adjust filters if state is currently empty
+        if (dbData.records.length === 0 && data.json_data.records.length > 0) {
             const sortedDates = [...data.json_data.records].map(r => r.date).sort();
             setFromDate(sortedDates[0]);
             setToDate(sortedDates[sortedDates.length - 1]);
-          }
         }
-      } catch (err) { 
-        console.error("Fetch Error:", err); 
-        setLastSync("No data found in cloud.");
       }
-    };
-    fetchInitialData();
+    } catch (err) { 
+      console.error("Cloud fetch failed", err); 
+      setLastSync("Cloud error");
+    }
+  };
+
+  useEffect(() => {
+    fetchCloudData();
   }, [supabaseClient]);
 
   // --- CORE RAW DATA AGGREGATOR ---
@@ -192,7 +210,7 @@ export default function App() {
         return true;
     });
     
-    // Build Available Filters from ALL records
+    // Build Available Filters
     const zoneSet = new Set();
     const statusSet = new Set();
     (dbData.records || []).forEach(r => {
@@ -225,35 +243,28 @@ export default function App() {
             recordsWithResTime++;
         }
 
-        // Status Pie
         let stat = String(r.status || 'Pending').trim();
         statusMap[stat] = (statusMap[stat] || 0) + 1;
 
-        // Zones & Coach Types
         if (r.zone && r.zone !== 'Unknown') zoneMap[r.zone] = (zoneMap[r.zone] || 0) + 1;
         if (r.coachType && r.coachType !== 'Unknown') coachMap[r.coachType] = (coachMap[r.coachType] || 0) + 1;
 
-        // MoM Data
         momMap[r.month] = (momMap[r.month] || 0) + 1; 
         
-        // Category MoM
         mSet.add(r.month);
         if (!catMomMap[r.category]) catMomMap[r.category] = { Total: 0 };
         catMomMap[r.category][r.month] = (catMomMap[r.category][r.month] || 0) + 1;
         catMomMap[r.category].Total += 1;
 
-        // Train Matrix
         catSet.add(r.category);
         if (!trainMap[r.train]) trainMap[r.train] = { train: r.train, Total: 0 };
         trainMap[r.train].Total += 1;
         trainMap[r.train][r.category] = (trainMap[r.train][r.category] || 0) + 1;
 
-        // Feedback
         let rate = String(r.rating || 'Not Rated').trim();
         if(rate === '' || rate.toLowerCase() === 'null') rate = 'Not Rated';
         feedbackMap[rate] = (feedbackMap[rate] || 0) + 1;
 
-        // Shifts
         if(shiftMap[r.shift] !== undefined) shiftMap[r.shift] += 1;
     });
 
@@ -274,7 +285,6 @@ export default function App() {
     const uniqueCats = Array.from(catSet).sort();
     const feedbackData = Object.entries(feedbackMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
 
-    // Extraction Tables
     const unsatTable = validRecords.filter(r => (r.rating||'').toLowerCase().includes('unsatisfactory'));
     const pestTable = validRecords.filter(r => r.isPest);
     const shiftData = Object.entries(shiftMap).map(([shift, complaints]) => ({ shift, complaints }));
@@ -287,11 +297,11 @@ export default function App() {
     };
   }, [dbData, fromDate, toDate, selectedZone, selectedStatus]);
 
-  // --- STRICT RAW DATA PARSER ---
+  // --- ROBUST FILE PARSER ---
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file || !window.XLSX || !supabaseClient) {
-        showToast("Parser engines are still loading. Please wait a second and try again.");
+        showToast("Systems are still initializing. Please try again in 2 seconds.");
         return;
     }
 
@@ -303,46 +313,42 @@ export default function App() {
         const buffer = evt.target.result;
         const workbook = window.XLSX.read(buffer, { type: 'array' });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        
+        // Read as matrix to avoid header-key mismatch issues
         const rawArray = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
         
-        if (rawArray.length === 0) throw new Error("The uploaded sheet is empty.");
+        if (rawArray.length === 0) throw new Error("File is empty.");
 
+        // Dynamic header detection with normalization
         let headerRowIdx = -1;
-        let headers = [];
+        let colMap = {};
         
-        for (let i = 0; i < Math.min(20, rawArray.length); i++) {
+        for (let i = 0; i < Math.min(30, rawArray.length); i++) {
             const row = rawArray[i];
             if (!row || !Array.isArray(row)) continue;
-            const cleanRow = row.map(c => String(c).toLowerCase().replace(/[^a-z0-9]/g, ''));
+            
+            const cleanRow = row.map(c => String(c).toLowerCase().replace(/[^a-z0-9]/g, '').trim());
+            
             if (cleanRow.includes('complaintrefno') || cleanRow.includes('createdon')) {
                 headerRowIdx = i;
-                headers = cleanRow; 
+                cleanRow.forEach((val, colIdx) => {
+                    if (val) colMap[val] = colIdx;
+                });
                 break;
             }
         }
 
         if (headerRowIdx === -1) {
-            showToast("Warning: Could not find 'complaintRefNo' or 'createdOn'. Ensure this is a Raw RailMadad Export.");
+            showToast("⚠️ Standard Raw Data headers not found. Ensure you are uploading a Raw RailMadad CSV.");
             setIsUploading(false);
             e.target.value = null; 
             return;
         }
 
-        const refIdx = headers.indexOf('complaintrefno');
-        const dateIdx = headers.indexOf('createdon');
-        const catIdx = headers.indexOf('comptypename');
-        const subCatIdx = headers.indexOf('subtypename');
-        const trainIdx = headers.indexOf('trainstation');
-        const trainNameIdx = headers.indexOf('trainnameforreport');
-        const rateIdx = headers.indexOf('rating');
-        const descIdx = headers.indexOf('complaintdesc');
-        const remarksIdx = headers.indexOf('remarks');
-        
-        const statusIdx = headers.indexOf('status') !== -1 ? headers.indexOf('status') : headers.indexOf('finalstatus');
-        const zoneIdx = headers.indexOf('zonecode');
-        const coachTypeIdx = headers.indexOf('coachtype');
-        const diffIdx = headers.indexOf('diff') !== -1 ? headers.indexOf('diff') : headers.indexOf('avgcdiff');
-        const channelIdx = headers.indexOf('channeltype') !== -1 ? headers.indexOf('channeltype') : headers.indexOf('complaintmode');
+        const getValue = (row, key) => {
+            const idx = colMap[key];
+            return (idx !== undefined && row[idx] !== undefined) ? row[idx] : null;
+        };
 
         const existingMap = new Map();
         (dbData.records || []).forEach(r => existingMap.set(String(r.id), r));
@@ -354,11 +360,10 @@ export default function App() {
             const row = rawArray[i];
             if (!row || row.length === 0) continue;
 
-            const refNo = refIdx !== -1 ? row[refIdx] : null;
-            const createdOn = dateIdx !== -1 ? row[dateIdx] : null;
+            const refNo = getValue(row, 'complaintrefno');
+            const createdOn = getValue(row, 'createdon');
             if (!refNo || !createdOn) continue; 
 
-            // Strict Deduplication
             const recordId = String(refNo).trim();
             if (existingMap.has(recordId)) {
                 duplicatesSkipped++;
@@ -368,35 +373,35 @@ export default function App() {
             const parsedObj = parseRawDate(createdOn);
             if (!parsedObj) continue;
 
-            const rawCat = catIdx !== -1 && row[catIdx] ? String(row[catIdx]).trim() : 'Uncategorized';
-            const rawSubCat = subCatIdx !== -1 && row[subCatIdx] ? String(row[subCatIdx]).trim() : '';
-            const rawDesc = descIdx !== -1 && row[descIdx] ? String(row[descIdx]).trim() : '';
+            const rawCat = getValue(row, 'comptypename') || 'Uncategorized';
+            const rawSubCat = getValue(row, 'subtypename') || '';
+            const rawDesc = getValue(row, 'complaintdesc') || '';
             
             const isPest = rawSubCat.toLowerCase().includes('cockroach') || rawSubCat.toLowerCase().includes('rodent') || 
                            rawSubCat.toLowerCase().includes('rat') || rawSubCat.toLowerCase().includes('pest') ||
                            rawDesc.toLowerCase().includes('cockroach') || rawDesc.toLowerCase().includes('rodent');
 
-            const rawTrain = (trainIdx !== -1 ? String(row[trainIdx]) : "") + " " + (trainNameIdx !== -1 ? String(row[trainNameIdx]) : "");
+            const trainStation = getValue(row, 'trainstation');
+            const trainReportName = getValue(row, 'trainnameforreport');
+            const rawTrain = String(trainStation || "") + " " + String(trainReportName || "");
             const matchTrain = rawTrain.match(/\b\d{4,5}\b/);
-            const trainNo = matchTrain ? matchTrain[0] : (trainIdx !== -1 && row[trainIdx] ? String(row[trainIdx]) : 'Unknown');
+            const trainNo = matchTrain ? matchTrain[0] : (trainStation ? String(trainStation) : 'Unknown');
 
             const newRecord = {
                 id: recordId,
                 date: parsedObj.date,
                 month: parsedObj.month,
                 shift: parsedObj.shift,
-                category: rawCat, 
-                subType: rawSubCat,
+                category: String(rawCat).trim(), 
+                subType: String(rawSubCat).trim(),
                 isPest: isPest,
                 train: trainNo,
-                rating: rateIdx !== -1 ? String(row[rateIdx] || 'Not Rated').trim() : 'Not Rated',
-                status: statusIdx !== -1 && row[statusIdx] ? String(row[statusIdx]).trim() : 'Unknown',
-                zone: zoneIdx !== -1 && row[zoneIdx] ? String(row[zoneIdx]).trim() : 'Unknown',
-                coachType: coachTypeIdx !== -1 && row[coachTypeIdx] ? String(row[coachTypeIdx]).trim() : 'Unknown',
-                channel: channelIdx !== -1 && row[channelIdx] ? String(row[channelIdx]).trim() : 'Unknown',
-                resTimeMins: parseResolutionTime(diffIdx !== -1 ? row[diffIdx] : null),
-                desc: rawDesc.substring(0, 200),
-                remarks: remarksIdx !== -1 ? String(row[remarksIdx] || '').substring(0, 200) : ''
+                rating: String(getValue(row, 'rating') || 'Not Rated').trim(),
+                status: String(getValue(row, 'status') || getValue(row, 'finalstatus') || 'Unknown').trim(),
+                zone: String(getValue(row, 'zonecode') || 'Unknown').trim(),
+                coachType: String(getValue(row, 'coachtype') || 'Unknown').trim(),
+                resTimeMins: parseResolutionTime(getValue(row, 'diff') || getValue(row, 'avgcdiff')),
+                desc: String(rawDesc).substring(0, 200),
             };
 
             existingMap.set(newRecord.id, newRecord);
@@ -406,7 +411,6 @@ export default function App() {
         if (newRecordsAdded > 0) {
             const newData = { records: Array.from(existingMap.values()) };
 
-            // Optimistic Local Update
             setDbData(newData);
             setLastSync(new Date().toLocaleTimeString());
             
@@ -414,9 +418,9 @@ export default function App() {
             setFromDate(sortedDates[0]);
             setToDate(sortedDates[sortedDates.length - 1]);
 
-            showToast(`Success! Added ${newRecordsAdded} records. Skipped ${duplicatesSkipped} duplicates.`);
+            showToast(`✅ Successfully added ${newRecordsAdded} records.`);
 
-            // Push to Supabase Cloud Storage
+            // Push to Cloud
             const { error } = await supabaseClient.from('railmadad_sync').upsert({ 
                 id: 1,
                 json_data: newData, 
@@ -424,17 +428,15 @@ export default function App() {
             }, { onConflict: 'id' });
 
             if (error) {
-                console.error("Supabase Save Error:", error);
-                showToast("⚠️ Local update succeeded, but Cloud Save failed.");
+                console.error("Cloud Save failed", error);
+                showToast("⚠️ Cloud Sync failed. Check Supabase connection.");
             }
-        } else if (duplicatesSkipped > 0) {
-            showToast(`Upload complete. No new data found.`);
         } else {
-            showToast("Warning: No valid records detected in the file.");
+            showToast("No new records were added (All duplicates).");
         }
       } catch (err) {
-        console.error("Parse Error:", err);
-        showToast("Error processing file. Please ensure you upload the Raw Data CSV.");
+        console.error("Critical Parse Error:", err);
+        showToast("❌ Error processing file. Please check Excel format.");
       }
       setIsUploading(false);
       e.target.value = null; 
@@ -454,9 +456,9 @@ export default function App() {
 
     try {
       await supabaseClient.from('railmadad_sync').upsert({ id: 1, json_data: initialRawDatabase, last_updated: new Date().toISOString() }, { onConflict: 'id' });
-      showToast("Database successfully wiped clean.");
+      showToast("Database wiped clean.");
     } catch (err) {
-      showToast("⚠️ Cloud Sync failed during reset.");
+      showToast("Cloud reset failed.");
     }
   };
 
@@ -465,7 +467,7 @@ export default function App() {
       {toastMessage && (
         <div className="fixed bottom-6 right-6 bg-slate-800 text-white px-6 py-4 rounded-xl shadow-2xl z-50 flex items-center animate-bounce border border-slate-700">
           <Sparkles className="w-5 h-5 mr-3 text-indigo-400" />
-          <span className="font-medium text-sm leading-snug">{toastMessage}</span>
+          <span className="font-medium text-sm leading-snug">{String(toastMessage)}</span>
         </div>
       )}
 
@@ -477,7 +479,7 @@ export default function App() {
             </div>
             <h3 className="text-xl font-bold text-slate-800 mb-2">Wipe Database?</h3>
             <p className="text-sm text-slate-500 mb-6 leading-relaxed">
-              This will permanently delete all raw data. The dashboard will return to a completely empty state.
+              This will permanently delete all raw data.
             </p>
             <div className="flex space-x-3">
               <button onClick={() => setShowResetModal(false)} className="flex-1 py-2.5 rounded-lg border border-slate-200 text-slate-600 font-semibold text-sm hover:bg-slate-50 transition-colors">Cancel</button>
@@ -510,7 +512,7 @@ export default function App() {
                 </>
               )}
            </label>
-           <p className="text-[10px] text-slate-400 mt-3 text-center font-medium italic">Last Sync: {String(lastSync)}</p>
+           <p className="text-[10px] text-slate-400 mt-3 text-center font-medium italic">Cloud Status: {String(lastSync)}</p>
         </div>
 
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
@@ -529,7 +531,7 @@ export default function App() {
 
         <div className="p-4 border-t border-slate-100 bg-slate-50">
            <button onClick={() => setShowResetModal(true)} className="flex items-center justify-center w-full py-2 text-[11px] font-bold text-rose-500 hover:bg-rose-50 rounded-lg transition-colors mb-4">
-             <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Wipe Entire Database
+             <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Wipe Local & Cloud
            </button>
            <div className="flex items-center justify-center opacity-70 hover:opacity-100 transition-opacity">
              <Cpu className="w-4 h-4 text-indigo-600 mr-2" />
@@ -554,14 +556,14 @@ export default function App() {
                  <span className="font-bold text-slate-600 mr-2 text-[10px] uppercase tracking-wider">Zone</span>
                  <select value={selectedZone} onChange={e => setSelectedZone(e.target.value)} className="bg-white border border-slate-200 rounded px-2 py-1 text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer font-medium max-w-[100px]">
                     <option value="All">All</option>
-                    {availableZones.map(z => <option key={z} value={String(z)}>{String(z)}</option>)}
+                    {availableZones.map(z => <option key={String(z)} value={String(z)}>{String(z)}</option>)}
                  </select>
               </div>
               <div className="flex items-center text-sm">
                  <span className="font-bold text-slate-600 mx-2 text-[10px] uppercase tracking-wider">Status</span>
                  <select value={selectedStatus} onChange={e => setSelectedStatus(e.target.value)} className="bg-white border border-slate-200 rounded px-2 py-1 text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer font-medium max-w-[100px]">
                     <option value="All">All</option>
-                    {availableStatuses.map(s => <option key={s} value={String(s)}>{String(s)}</option>)}
+                    {availableStatuses.map(s => <option key={String(s)} value={String(s)}>{String(s)}</option>)}
                  </select>
               </div>
               <div className="flex items-center text-sm">
@@ -582,14 +584,14 @@ export default function App() {
                <div className="w-24 h-24 bg-indigo-50 rounded-full flex items-center justify-center mb-6"><FileSpreadsheet className="w-12 h-12 text-indigo-400" /></div>
                <h3 className="text-3xl font-black text-slate-800 tracking-tight">Database is Empty</h3>
                <p className="text-slate-500 mt-4 max-w-md leading-relaxed font-medium">
-                 Click the <b>"Append Raw Export"</b> button in the sidebar to securely upload your raw RailMadad CSV file. Exact duplicates will be skipped automatically.
+                 Click the <b>"Append Raw Export"</b> button in the sidebar to securely upload your raw RailMadad CSV file.
                </p>
              </div>
           ) : !kpis || kpis.total === 0 ? (
              <div className="bg-white p-12 mt-10 rounded-2xl border border-slate-200 flex flex-col items-center justify-center text-center max-w-2xl mx-auto shadow-sm">
                <Calendar className="w-12 h-12 text-slate-300 mb-4" />
-               <h3 className="text-xl font-bold text-slate-800">No Data Matches Filter</h3>
-               <p className="text-slate-500 mt-2 max-w-sm">Try expanding your dates or removing Zone/Status filters to see results.</p>
+               <h3 className="text-xl font-bold text-slate-800">No Match</h3>
+               <p className="text-slate-500 mt-2 max-w-sm">Try removing Zone/Status filters or expanding dates.</p>
              </div>
           ) : (
             <>
@@ -597,7 +599,7 @@ export default function App() {
               {activeTab === 'overview' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                    <MetricCard title="Total Filtered Cases" value={String(kpis.total)} icon={LayoutDashboard} colorClass="bg-blue-600 text-white" />
+                    <MetricCard title="Filtered Cases" value={String(kpis.total)} icon={LayoutDashboard} colorClass="bg-blue-600 text-white" />
                     <MetricCard title="Avg Resolution Time" value={String(kpis.avgResTime)} icon={Clock} colorClass="bg-emerald-600 text-white" />
                     <MetricCard title="Unsatisfactory Rate" value={`${String(kpis.unsat)}%`} icon={AlertTriangle} colorClass="bg-rose-600 text-white" />
                     <MetricCard title="Resolution Rate" value={`${String(kpis.resolved)}%`} icon={CheckCircle} colorClass="bg-indigo-600 text-white" />
@@ -606,7 +608,7 @@ export default function App() {
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
                       <div className="flex items-center justify-between mb-6">
-                         <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Month-over-Month (MoM) Volume Trend</h3>
+                         <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">MoM Volume Trend</h3>
                          <BarChart3 className="text-slate-300 w-5 h-5"/>
                       </div>
                       <div className="h-80">
@@ -624,7 +626,7 @@ export default function App() {
 
                     <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
                         <div className="flex items-center justify-between mb-6">
-                           <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Complaint Status Distribution</h3>
+                           <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Status Distribution</h3>
                            <CheckCircle className="text-slate-300 w-5 h-5"/>
                         </div>
                         <div className="h-80">
@@ -647,13 +649,13 @@ export default function App() {
               {activeTab === 'category' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-                    <div className="px-6 py-5 border-b border-slate-100 bg-slate-50"><h3 className="text-base font-bold text-slate-800">Category Wise Month-over-Month (MoM) Table</h3></div>
+                    <div className="px-6 py-5 border-b border-slate-100 bg-slate-50"><h3 className="text-base font-bold text-slate-800">Category Wise MoM Summary</h3></div>
                     <div className="overflow-x-auto max-h-[500px]">
                       <table className="min-w-full text-left border-collapse">
                         <thead className="sticky top-0 bg-slate-100 z-10 shadow-sm">
                           <tr className="text-slate-500 text-[10px] uppercase tracking-widest">
-                            <th className="p-4 font-bold border-b border-slate-200">Raw Category Name</th>
-                            {monthsSorted.map(m => <th key={m} className="p-4 font-bold border-b border-slate-200">{String(m)}</th>)}
+                            <th className="p-4 font-bold border-b border-slate-200">Category (compTypeName)</th>
+                            {monthsSorted.map(m => <th key={String(m)} className="p-4 font-bold border-b border-slate-200">{String(m)}</th>)}
                             <th className="p-4 font-black border-b border-slate-200 text-slate-800">Total</th>
                           </tr>
                         </thead>
@@ -661,7 +663,7 @@ export default function App() {
                           {catMomData.map((row, idx) => (
                             <tr key={idx} className="hover:bg-slate-50 transition-colors">
                               <td className="p-4 font-bold text-slate-900 flex items-center"><Sparkles className="w-4 h-4 mr-2 text-indigo-400" />{String(row.category)}</td>
-                              {monthsSorted.map(m => <td key={m} className="p-4 font-medium text-slate-600">{String(row[m] || '-')}</td>)}
+                              {monthsSorted.map(m => <td key={String(m)} className="p-4 font-medium text-slate-600">{String(row[m] || '-')}</td>)}
                               <td className="p-4 font-black text-indigo-600">{String(row.Total)}</td>
                             </tr>
                           ))}
@@ -676,7 +678,7 @@ export default function App() {
                        <h3 className="text-base font-bold text-rose-900">Pest Control & Rodent Target List</h3>
                     </div>
                     {pestTable.length === 0 ? (
-                      <div className="p-8 text-center text-slate-500 font-medium">No Pest Control/Rodent complaints identified in this period based on SubType/Description keywords.</div>
+                      <div className="p-8 text-center text-slate-500 font-medium">No Pest Control complaints identified via description keywords.</div>
                     ) : (
                       <div className="overflow-x-auto max-h-96">
                         <table className="min-w-full text-left border-collapse">
@@ -685,7 +687,7 @@ export default function App() {
                               <th className="p-4 font-bold">Ref No</th>
                               <th className="p-4 font-bold">Date</th>
                               <th className="p-4 font-bold">Train</th>
-                              <th className="p-4 font-bold">Raw SubType & Passenger Desc.</th>
+                              <th className="p-4 font-bold">Details</th>
                             </tr>
                           </thead>
                           <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
@@ -695,7 +697,7 @@ export default function App() {
                                 <td className="p-4 font-medium whitespace-nowrap">{String(row.date)}</td>
                                 <td className="p-4 font-bold text-rose-700">{String(row.train)}</td>
                                 <td className="p-4 text-slate-600 max-w-md">
-                                  <span className="font-semibold text-slate-800">{String(row.subType || "No SubType")}</span> <br/>
+                                  <span className="font-semibold text-slate-800">{String(row.subType || "Unclassified")}</span> <br/>
                                   <span className="text-xs">{String(row.desc)}</span>
                                 </td>
                               </tr>
@@ -712,7 +714,7 @@ export default function App() {
               {activeTab === 'trains' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Top 15 Trains by Total Complaints</h3>
+                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Top 15 Trains</h3>
                     <div className="h-[400px]">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={trainData.slice(0, 15)} layout="vertical" margin={{ left: 60, right: 20 }}>
@@ -732,16 +734,16 @@ export default function App() {
                       <table className="min-w-full text-left border-collapse">
                         <thead className="sticky top-0 bg-slate-100 z-10 shadow-sm">
                           <tr className="text-slate-500 text-[10px] uppercase tracking-widest">
-                            <th className="p-4 font-bold border-b border-slate-200">Train Number</th>
-                            {uniqueCats.map(c => <th key={c} className="p-4 font-bold border-b border-slate-200 whitespace-nowrap">{String(c)}</th>)}
+                            <th className="p-4 font-bold border-b border-slate-200">Train</th>
+                            {uniqueCats.map(c => <th key={String(c)} className="p-4 font-bold border-b border-slate-200 whitespace-nowrap">{String(c)}</th>)}
                             <th className="p-4 font-black border-b border-slate-200 text-slate-800">Total</th>
                           </tr>
                         </thead>
                         <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
                           {trainData.map((row, idx) => (
                             <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                              <td className="p-4 font-bold flex items-center text-slate-900"><TrainFront className="w-4 h-4 mr-2 text-indigo-400" />{String(row.train)}</td>
-                              {uniqueCats.map(c => <td key={c} className="p-4 font-medium text-slate-500">{String(row[c] || '-')}</td>)}
+                              <td className="p-4 font-bold flex items-center text-slate-900 whitespace-nowrap"><TrainFront className="w-4 h-4 mr-2 text-indigo-400" />{String(row.train)}</td>
+                              {uniqueCats.map(c => <td key={String(c)} className="p-4 font-medium text-slate-600">{String(row[c] || '-')}</td>)}
                               <td className="p-4 font-black text-indigo-600">{String(row.Total)}</td>
                             </tr>
                           ))}
@@ -752,34 +754,34 @@ export default function App() {
                 </div>
               )}
 
-              {/* TAB 4: GEO & COACH ANALYTICS */}
+              {/* TAB 4: GEO & COACH */}
               {activeTab === 'geo' && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Complaints by Railway Zone</h3>
+                  <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm h-fit">
+                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Zone Analysis</h3>
                     <div className="h-[400px]">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={zoneData} layout="vertical" margin={{ left: 20, right: 20 }}>
                           <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                           <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
                           <YAxis dataKey="zone" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#334155', fontWeight: 600 }} />
-                          <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
-                          <Bar dataKey="count" name="Total Cases" fill="#f59e0b" radius={[0, 6, 6, 0]} barSize={20} />
+                          <Tooltip cursor={{ fill: '#f8fafc' }} />
+                          <Bar dataKey="count" name="Cases" fill="#f59e0b" radius={[0, 6, 6, 0]} barSize={20} />
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
                   </div>
 
-                  <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Complaints by Coach Type</h3>
+                  <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm h-fit">
+                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Coach Type Distribution</h3>
                     <div className="h-[400px]">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={coachData} layout="vertical" margin={{ left: 20, right: 20 }}>
                           <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                           <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
                           <YAxis dataKey="coachType" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#334155', fontWeight: 600 }} />
-                          <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
-                          <Bar dataKey="count" name="Total Cases" fill="#10b981" radius={[0, 6, 6, 0]} barSize={20} />
+                          <Tooltip cursor={{ fill: '#f8fafc' }} />
+                          <Bar dataKey="count" name="Cases" fill="#10b981" radius={[0, 6, 6, 0]} barSize={20} />
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
@@ -791,13 +793,13 @@ export default function App() {
               {activeTab === 'operations' && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden h-fit">
-                    <div className="px-6 py-5 border-b border-slate-100 bg-slate-50"><h3 className="text-base font-bold text-slate-800">Shift Wise Complaint Volume</h3></div>
+                    <div className="px-6 py-5 border-b border-slate-100 bg-slate-50"><h3 className="text-base font-bold text-slate-800">Shift Volume</h3></div>
                     <div className="overflow-x-auto">
                       <table className="min-w-full text-left border-collapse">
                         <thead>
                           <tr className="bg-white text-slate-400 text-[10px] uppercase tracking-widest border-b border-slate-100">
-                            <th className="p-4 font-bold">8-Hour Shift Timeline</th>
-                            <th className="p-4 font-bold">Complaint Volume</th>
+                            <th className="p-4 font-bold">Shift Bracket</th>
+                            <th className="p-4 font-bold">Volume</th>
                           </tr>
                         </thead>
                         <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
@@ -814,17 +816,14 @@ export default function App() {
 
                   <div className="space-y-8">
                     <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                        <div className="flex items-center justify-between mb-6">
-                           <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Feedback Categorization</h3>
-                           <MessageSquareWarning className="text-slate-300 w-5 h-5"/>
-                        </div>
+                        <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Feedback Type</h3>
                         <div className="h-64">
                           <ResponsiveContainer width="100%" height="100%">
                             <PieChart>
                               <Pie data={feedbackData} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={4} dataKey="value">
                                 {feedbackData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
                               </Pie>
-                              <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                              <Tooltip />
                               <Legend verticalAlign="bottom" height={36} iconType="circle" />
                             </PieChart>
                           </ResponsiveContainer>
@@ -834,10 +833,10 @@ export default function App() {
                     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
                        <div className="px-6 py-5 border-b border-slate-100 bg-rose-50 flex items-center">
                            <MessageSquareWarning className="w-5 h-5 text-rose-600 mr-2" />
-                           <h3 className="text-base font-bold text-rose-900">Highest Feedback: Unsatisfactory Cases</h3>
+                           <h3 className="text-base font-bold text-rose-900">Unsatisfactory Feedback Cases</h3>
                        </div>
                        {unsatTable.length === 0 ? (
-                         <div className="p-8 text-center text-slate-500 font-medium">No unsatisfactory feedback logged in this period.</div>
+                         <div className="p-8 text-center text-slate-500 font-medium">No results found.</div>
                        ) : (
                          <div className="overflow-x-auto max-h-96">
                            <table className="min-w-full text-left border-collapse">
@@ -845,7 +844,7 @@ export default function App() {
                                <tr className="text-slate-400 text-[10px] uppercase tracking-widest border-b border-slate-100">
                                  <th className="p-4 font-bold">Ref No.</th>
                                  <th className="p-4 font-bold">Train</th>
-                                 <th className="p-4 font-bold">Description</th>
+                                 <th className="p-4 font-bold">Desc</th>
                                </tr>
                              </thead>
                              <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
