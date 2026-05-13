@@ -960,9 +960,21 @@ export default function App() {
   }
 
   // Determine current active granularity trend data
-  const trendData = trendsGranularity === 'day' ? dailyTrend
+  const baseTrendData = trendsGranularity === 'day' ? dailyTrend
     : trendsGranularity === 'week' ? weeklyTrend
       : monthlyTrend;
+
+  // Enhance with Peak Labels (local maxima) for the volume chart
+  const trendData = baseTrendData.map((d, i, arr) => {
+    const prev = arr[i - 1]?.count ?? -1;
+    const next = arr[i + 1]?.count ?? -1;
+    // Local peak definition: strictly greater than previous, and >= next.
+    const isPeak = d.count > prev && d.count >= next && d.count > 0;
+    return {
+      ...d,
+      peakLabel: isPeak ? d.count : ''
+    };
+  });
 
   // Granularity dynamic label (e.g. "Daily", "Weekly", "Monthly")
   const granularityLabel = trendsGranularity === 'day' ? 'Daily' : trendsGranularity.charAt(0).toUpperCase() + trendsGranularity.slice(1) + 'ly';
@@ -1420,7 +1432,7 @@ export default function App() {
                   <Card title={`Complaint Volume Trend (${granularityLabel})`} icon={TrendingUp}>
                     <div className="h-[360px]">
                       <ResponsiveContainer width="100%" height="100%">
-                        <ComposedChart data={trendData} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
+                        <ComposedChart data={trendData} margin={{ top: 25, right: 20, bottom: 0, left: 0 }}>
                           <defs>
                             <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
                               <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4} />
@@ -1432,7 +1444,9 @@ export default function App() {
                           <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
                           <Tooltip />
                           <Legend wrapperStyle={{ fontSize: '12px' }} />
-                          <Area type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={2} fill="url(#trendGrad)" name="Complaints" />
+                          <Area type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={2} fill="url(#trendGrad)" name="Complaints">
+                            <LabelList dataKey="peakLabel" position="top" offset={10} fill={theme === 'dark' ? '#a5b4fc' : '#4f46e5'} fontSize={12} fontWeight="bold" />
+                          </Area>
                           {trendsGranularity === 'day' && <Line type="monotone" dataKey="movingAvg" stroke="#f59e0b" strokeWidth={2} dot={false} name="7-Day Moving Avg" />}
                         </ComposedChart>
                       </ResponsiveContainer>
