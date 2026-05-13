@@ -1311,7 +1311,7 @@ export default function App() {
                         <ResponsiveContainer width="100%" height="100%">
                           <ScatterChart margin={{ top: 20, right: 20, bottom: 40, left: 20 }}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={gridStroke} />
-                            <XAxis type="category" dataKey="category" tick={{ ...axisStyle, angle: -45, textAnchor: 'end' }} tickLine={false} axisLine={false} height={60} />
+                            <XAxis type="category" dataKey="category" allowDuplicatedCategory={false} tick={{ ...axisStyle, angle: -45, textAnchor: 'end' }} tickLine={false} axisLine={false} height={60} />
                             <YAxis type="number" dataKey="time" tick={axisStyle} tickLine={false} axisLine={false} />
                             <ZAxis type="category" dataKey="name" />
                             <Tooltip cursor={{ strokeDasharray: '3 3' }} />
