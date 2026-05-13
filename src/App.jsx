@@ -631,10 +631,10 @@ export default function App() {
 
     const shiftHeatmap = Array.from(shiftCatMap.values()).sort((a, b) => String(a.shift).localeCompare(String(b.shift)));
     
-    // Sorted ascending so highest average minute categories appear at the TOP of the Recharts vertical BarChart
+    // Sorted descending so highest average minute categories appear at the TOP of the Recharts vertical BarChart
     const resSpeedBar = Array.from(catResMap.values())
       .map((c) => ({ category: String(c.category), avgMins: Math.round(c.sum / c.count) }))
-      .sort((a, b) => a.avgMins - b.avgMins); 
+      .sort((a, b) => b.avgMins - a.avgMins); 
       
     const wateringList = Array.from(wateringMap.entries())
       .map(([station, count]) => ({ station: String(station), count }))
