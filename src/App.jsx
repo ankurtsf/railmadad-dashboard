@@ -6,25 +6,21 @@ import {
 import { 
   LayoutDashboard, TrainFront, Clock, MessageSquareWarning, 
   Sparkles, Menu, X, AlertTriangle, CheckCircle, Upload, 
-  Calendar, Trash2, Cpu, FileSpreadsheet, Bug, BarChart3
+  Calendar, Trash2, Cpu, FileSpreadsheet, Bug, BarChart3, Map, Filter
 } from 'lucide-react';
 
 const COLORS = ['#3b82f6', '#8b5cf6', '#0ea5e9', '#f59e0b', '#ef4444', '#10b981', '#6366f1', '#f43f5e', '#a855f7', '#ec4899'];
 
-// Strictly empty initial state. No placeholder data.
+// Strictly empty initial state.
 const initialRawDatabase = { records: [] };
 
 // --- STRICT RAW DATA PARSERS ---
-
-// Parses exact RailMadad Date Format: "22-05-25 22:51" or "2025-05-22"
 const parseRawDate = (raw) => {
     if (!raw) return null;
     const str = String(raw).trim();
-    
-    // Ignore pure floats (PNRs / Reference Numbers)
     if (/^\d+\.\d+$/.test(str)) return null; 
 
-    // Excel serial number conversion
+    // Excel serial number
     if (!isNaN(raw) && typeof raw === 'number' && raw > 40000 && raw < 50000) {
         const d = new Date(Math.round((raw - 25569) * 86400 * 1000));
         return {
@@ -34,7 +30,7 @@ const parseRawDate = (raw) => {
         };
     }
 
-    // Match DD-MM-YY HH:MM format from raw CSV
+    // Match DD-MM-YY HH:MM format
     const match = str.match(/^(\d{1,4})[-/.](\d{1,2})[-/.](\d{1,4})(?:\s+(\d{1,2}):(\d{2}))?/);
     if (!match) return null;
 
@@ -64,10 +60,26 @@ const getShift = (hour) => {
     return '00:00 - 08:00';
 };
 
+// Converts "1:16" to 76 minutes
+const parseResolutionTime = (val) => {
+    if (!val) return null;
+    const match = String(val).match(/(\d+):(\d+)/);
+    if (match) return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+    return null;
+};
+
+const formatMinutesToTime = (totalMins) => {
+    if (!totalMins || isNaN(totalMins)) return "0h 0m";
+    const h = Math.floor(totalMins / 60);
+    const m = Math.floor(totalMins % 60);
+    return `${h}h ${m}m`;
+};
+
 const navItemsList = [
-  { id: 'overview', label: 'Overview & MoM', icon: LayoutDashboard },
+  { id: 'overview', label: 'Overview & Analytics', icon: LayoutDashboard },
   { id: 'category', label: 'Category & Pest Control', icon: Sparkles },
   { id: 'trains', label: 'Train Analysis Matrix', icon: TrainFront },
+  { id: 'geo', label: 'Geo & Coach Types', icon: Map },
   { id: 'operations', label: 'Shifts & Feedback', icon: Clock },
 ];
 
@@ -77,49 +89,49 @@ export default function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [lastSync, setLastSync] = useState('Checking...');
   const [dbData, setDbData] = useState(initialRawDatabase);
-  
-  // Dynamic Dependency Injection (Prevents Build Errors & Requires Zero Setup)
   const [supabaseClient, setSupabaseClient] = useState(null);
 
+  // Filters
   const todayStr = new Date().toISOString().split('T')[0];
   const lastMonthStr = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   
   const [fromDate, setFromDate] = useState(lastMonthStr);
   const [toDate, setToDate] = useState(todayStr);
+  const [selectedZone, setSelectedZone] = useState('All');
+  const [selectedStatus, setSelectedStatus] = useState('All');
   
   const [toastMessage, setToastMessage] = useState('');
   const [showResetModal, setShowResetModal] = useState(false);
 
   const showToast = (msg) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(''), 5000);
+    setTimeout(() => setToastMessage(''), 6000);
   };
 
-  // 1. Initialize Supabase & XLSX Dynamically from CDNs
+  // 1. Inject Dependencies Dynamically (Avoids Canvas Build Errors)
   useEffect(() => {
-    const initDependencies = async () => {
+    const loadDependencies = async () => {
       if (!window.XLSX) {
-        await new Promise((res) => {
-          const s = document.createElement('script');
-          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-          s.onload = res;
-          document.head.appendChild(s);
-        });
+        const script1 = document.createElement('script');
+        script1.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+        document.head.appendChild(script1);
       }
       if (!window.supabase) {
-        await new Promise((res) => {
-          const s = document.createElement('script');
-          s.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
-          s.onload = res;
-          document.head.appendChild(s);
-        });
+        const script2 = document.createElement('script');
+        script2.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+        script2.onload = () => {
+           const url = 'https://npfuxifktdmxmzprfcxm.supabase.co';
+           const key = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZnV4aWZrdGRteG16cHJmY3htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2MjMwMDMsImV4cCI6MjA5NDE5OTAwM30.cCheIUxTAQWyoVyIwOLRd5usiyFI-q2GIn3A9NPFL78';
+           setSupabaseClient(window.supabase.createClient(url, key));
+        };
+        document.head.appendChild(script2);
+      } else {
+           const url = 'https://npfuxifktdmxmzprfcxm.supabase.co';
+           const key = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZnV4aWZrdGRteG16cHJmY3htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2MjMwMDMsImV4cCI6MjA5NDE5OTAwM30.cCheIUxTAQWyoVyIwOLRd5usiyFI-q2GIn3A9NPFL78';
+           setSupabaseClient(window.supabase.createClient(url, key));
       }
-      
-      const url = 'https://npfuxifktdmxmzprfcxm.supabase.co';
-      const key = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZnV4aWZrdGRteG16cHJmY3htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2MjMwMDMsImV4cCI6MjA5NDE5OTAwM30.cCheIUxTAQWyoVyIwOLRd5usiyFI-q2GIn3A9NPFL78';
-      setSupabaseClient(window.supabase.createClient(url, key));
     };
-    initDependencies();
+    loadDependencies();
   }, []);
 
   // 2. Fetch Data from Supabase
@@ -128,7 +140,7 @@ export default function App() {
 
     const fetchInitialData = async () => {
       try {
-        const { data } = await supabaseClient.from('railmadad_sync').select('*').eq('id', 1).single();
+        const { data, error } = await supabaseClient.from('railmadad_sync').select('*').eq('id', 1).single();
         if (data && data.json_data && data.json_data.records) {
           setDbData(data.json_data);
           setLastSync(new Date(data.last_updated).toLocaleTimeString());
@@ -156,23 +168,30 @@ export default function App() {
   // --- CORE RAW DATA AGGREGATOR ---
   const { 
     kpis, momData, catMomData, monthsSorted, trainData, 
-    uniqueCats, feedbackData, unsatTable, pestTable, shiftData 
+    uniqueCats, feedbackData, unsatTable, pestTable, shiftData,
+    zoneData, coachData, statusData, availableZones, availableStatuses
   } = useMemo(() => {
-    const validRecords = (dbData.records || []).filter(r => r.date >= fromDate && r.date <= toDate);
     
-    // 1. KPIs
-    let unsatCount = 0;
-    let resolvedCount = 0;
-    validRecords.forEach(r => { 
-        if ((r.rating||'').toLowerCase().includes('unsatisfactory')) unsatCount++; 
-        if ((r.status||'').toLowerCase().includes('closed')) resolvedCount++;
+    // Apply Global Filters
+    const validRecords = (dbData.records || []).filter(r => {
+        if (r.date < fromDate || r.date > toDate) return false;
+        if (selectedZone !== 'All' && r.zone !== selectedZone) return false;
+        if (selectedStatus !== 'All' && r.status !== selectedStatus) return false;
+        return true;
     });
     
-    const kpis = {
-       total: validRecords.length,
-       resolved: validRecords.length > 0 ? ((resolvedCount / validRecords.length) * 100).toFixed(1) : 0,
-       unsat: validRecords.length > 0 ? ((unsatCount / validRecords.length) * 100).toFixed(1) : 0,
-    };
+    // Build Available Filters
+    const zoneSet = new Set();
+    const statusSet = new Set();
+    (dbData.records || []).forEach(r => {
+        if(r.zone && r.zone !== 'Unknown') zoneSet.add(r.zone);
+        if(r.status && r.status !== 'Unknown') statusSet.add(r.status);
+    });
+
+    let unsatCount = 0;
+    let resolvedCount = 0;
+    let totalResTime = 0;
+    let recordsWithResTime = 0;
 
     const momMap = {};
     const catMomMap = {};
@@ -181,8 +200,27 @@ export default function App() {
     const catSet = new Set();
     const feedbackMap = {};
     const shiftMap = { '00:00 - 08:00': 0, '08:00 - 16:00': 0, '16:00 - 24:00': 0 };
+    const zoneMap = {};
+    const coachMap = {};
+    const statusMap = {};
 
     validRecords.forEach(r => { 
+        if ((r.rating||'').toLowerCase().includes('unsatisfactory')) unsatCount++; 
+        if ((r.status||'').toLowerCase().includes('closed')) resolvedCount++;
+        
+        if (r.resTimeMins > 0) {
+            totalResTime += r.resTimeMins;
+            recordsWithResTime++;
+        }
+
+        // Status Pie
+        let stat = String(r.status || 'Pending').trim();
+        statusMap[stat] = (statusMap[stat] || 0) + 1;
+
+        // Zones & Coach Types
+        if (r.zone && r.zone !== 'Unknown') zoneMap[r.zone] = (zoneMap[r.zone] || 0) + 1;
+        if (r.coachType && r.coachType !== 'Unknown') coachMap[r.coachType] = (coachMap[r.coachType] || 0) + 1;
+
         // MoM Data
         momMap[r.month] = (momMap[r.month] || 0) + 1; 
         
@@ -207,6 +245,16 @@ export default function App() {
         if(shiftMap[r.shift] !== undefined) shiftMap[r.shift] += 1;
     });
 
+    const kpis = {
+       total: validRecords.length,
+       resolved: validRecords.length > 0 ? ((resolvedCount / validRecords.length) * 100).toFixed(1) : 0,
+       unsat: validRecords.length > 0 ? ((unsatCount / validRecords.length) * 100).toFixed(1) : 0,
+       avgResTime: recordsWithResTime > 0 ? formatMinutesToTime(totalResTime / recordsWithResTime) : "N/A",
+    };
+
+    const statusData = Object.entries(statusMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
+    const zoneData = Object.entries(zoneMap).map(([zone, count]) => ({ zone, count })).sort((a,b) => b.count - a.count);
+    const coachData = Object.entries(coachMap).map(([coachType, count]) => ({ coachType, count })).sort((a,b) => b.count - a.count);
     const momData = Object.entries(momMap).map(([month, count]) => ({ month, count })).sort((a,b) => a.month.localeCompare(b.month));
     const monthsSorted = Array.from(mSet).sort();
     const catMomData = Object.entries(catMomMap).map(([category, counts]) => ({ category, ...counts })).sort((a,b) => b.Total - a.Total);
@@ -219,14 +267,19 @@ export default function App() {
     const pestTable = validRecords.filter(r => r.isPest);
     const shiftData = Object.entries(shiftMap).map(([shift, complaints]) => ({ shift, complaints }));
 
-    return { kpis, momData, catMomData, monthsSorted, trainData, uniqueCats, feedbackData, unsatTable, pestTable, shiftData };
-  }, [dbData, fromDate, toDate]);
+    return { 
+        kpis, momData, catMomData, monthsSorted, trainData, uniqueCats, 
+        feedbackData, unsatTable, pestTable, shiftData, zoneData, coachData, statusData,
+        availableZones: Array.from(zoneSet).sort(),
+        availableStatuses: Array.from(statusSet).sort()
+    };
+  }, [dbData, fromDate, toDate, selectedZone, selectedStatus]);
 
   // --- STRICT & AGGRESSIVE RAW DATA PARSER ---
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file || !window.XLSX || !supabaseClient) {
-        if (!window.XLSX) showToast("Parser engines are still loading. Please wait a second and try again.");
+        showToast("Systems are still loading. Please wait a second and try again.");
         return;
     }
 
@@ -242,27 +295,22 @@ export default function App() {
         
         if (rawArray.length === 0) throw new Error("The uploaded sheet is empty.");
 
-        // Identify EXACT Raw Data Headers via aggressive alphanumeric normalization
-        // This neutralizes BOMs (\ufeff), trailing spaces, and capitalization issues
         let headerRowIdx = -1;
         let headers = [];
         
         for (let i = 0; i < Math.min(20, rawArray.length); i++) {
             const row = rawArray[i];
             if (!row || !Array.isArray(row)) continue;
-            
-            // Convert array of cells to alphanumeric lowercase strings only
             const cleanRow = row.map(c => String(c).toLowerCase().replace(/[^a-z0-9]/g, ''));
-            
             if (cleanRow.includes('complaintrefno') || cleanRow.includes('createdon')) {
                 headerRowIdx = i;
-                headers = cleanRow; // Store the normalized headers
+                headers = cleanRow; 
                 break;
             }
         }
 
         if (headerRowIdx === -1) {
-            showToast("Warning: Could not find 'complaintRefNo' or 'createdOn' in the file. Ensure it is a Raw RailMadad Export.");
+            showToast("Warning: Could not find 'complaintRefNo' or 'createdOn'. Ensure it is a Raw RailMadad Export.");
             setIsUploading(false);
             e.target.value = null; 
             return;
@@ -277,7 +325,13 @@ export default function App() {
         const rateIdx = headers.indexOf('rating');
         const descIdx = headers.indexOf('complaintdesc');
         const remarksIdx = headers.indexOf('remarks');
-        const statusIdx = headers.indexOf('status');
+        
+        // New Analytics Columns
+        const statusIdx = headers.indexOf('status') !== -1 ? headers.indexOf('status') : headers.indexOf('finalstatus');
+        const zoneIdx = headers.indexOf('zonecode');
+        const coachTypeIdx = headers.indexOf('coachtype');
+        const diffIdx = headers.indexOf('diff') !== -1 ? headers.indexOf('diff') : headers.indexOf('avgcdiff');
+        const channelIdx = headers.indexOf('channeltype') !== -1 ? headers.indexOf('channeltype') : headers.indexOf('complaintmode');
 
         const existingMap = new Map();
         (dbData.records || []).forEach(r => existingMap.set(r.id, r));
@@ -303,20 +357,14 @@ export default function App() {
             const parsedObj = parseRawDate(createdOn);
             if (!parsedObj) continue;
 
-            // Raw Type & Exact Category Mapping
             const rawCat = catIdx !== -1 && row[catIdx] ? String(row[catIdx]).trim() : 'Uncategorized';
             const rawSubCat = subCatIdx !== -1 && row[subCatIdx] ? String(row[subCatIdx]).trim() : '';
             const rawDesc = descIdx !== -1 && row[descIdx] ? String(row[descIdx]).trim() : '';
             
-            // Check for pest control purely by inspecting subType and Desc
-            const isPest = rawSubCat.toLowerCase().includes('cockroach') || 
-                           rawSubCat.toLowerCase().includes('rodent') || 
-                           rawSubCat.toLowerCase().includes('rat') || 
-                           rawSubCat.toLowerCase().includes('pest') ||
-                           rawDesc.toLowerCase().includes('cockroach') ||
-                           rawDesc.toLowerCase().includes('rodent');
+            const isPest = rawSubCat.toLowerCase().includes('cockroach') || rawSubCat.toLowerCase().includes('rodent') || 
+                           rawSubCat.toLowerCase().includes('rat') || rawSubCat.toLowerCase().includes('pest') ||
+                           rawDesc.toLowerCase().includes('cockroach') || rawDesc.toLowerCase().includes('rodent');
 
-            // Extract Train
             const rawTrain = (trainIdx !== -1 ? String(row[trainIdx]) : "") + " " + (trainNameIdx !== -1 ? String(row[trainNameIdx]) : "");
             const matchTrain = rawTrain.match(/\b\d{4,5}\b/);
             const trainNo = matchTrain ? matchTrain[0] : (trainIdx !== -1 && row[trainIdx] ? String(row[trainIdx]) : 'Unknown');
@@ -326,12 +374,16 @@ export default function App() {
                 date: parsedObj.date,
                 month: parsedObj.month,
                 shift: parsedObj.shift,
-                category: rawCat, // We use exact compTypeName from Raw CSV!
+                category: rawCat, 
                 subType: rawSubCat,
                 isPest: isPest,
                 train: trainNo,
                 rating: rateIdx !== -1 ? String(row[rateIdx] || 'Not Rated').trim() : 'Not Rated',
-                status: statusIdx !== -1 ? String(row[statusIdx] || 'Unknown').trim() : 'Unknown',
+                status: statusIdx !== -1 && row[statusIdx] ? String(row[statusIdx]).trim() : 'Unknown',
+                zone: zoneIdx !== -1 && row[zoneIdx] ? String(row[zoneIdx]).trim() : 'Unknown',
+                coachType: coachTypeIdx !== -1 && row[coachTypeIdx] ? String(row[coachTypeIdx]).trim() : 'Unknown',
+                channel: channelIdx !== -1 && row[channelIdx] ? String(row[channelIdx]).trim() : 'Unknown',
+                resTimeMins: parseResolutionTime(diffIdx !== -1 ? row[diffIdx] : null),
                 desc: rawDesc.substring(0, 200),
                 remarks: remarksIdx !== -1 ? String(row[remarksIdx] || '').substring(0, 200) : ''
             };
@@ -343,6 +395,7 @@ export default function App() {
         if (newRecordsAdded > 0) {
             const newData = { records: Array.from(existingMap.values()) };
 
+            // Optimistic Update
             setDbData(newData);
             setLastSync(new Date().toLocaleTimeString());
             
@@ -352,15 +405,22 @@ export default function App() {
 
             showToast(`Success! Appended ${newRecordsAdded} new raw complaints. Skipped ${duplicatesSkipped} exact duplicates.`);
 
-            await supabaseClient.from('railmadad_sync').update({ 
+            // Push to Supabase using UPSERT to prevent row missing errors
+            const { error } = await supabaseClient.from('railmadad_sync').upsert({ 
+                id: 1,
                 json_data: newData, 
                 last_updated: new Date().toISOString() 
-            }).eq('id', 1);
+            }, { onConflict: 'id' });
+
+            if (error) {
+                console.error("Supabase Save Error:", error);
+                showToast("⚠️ Local update succeeded, but Cloud Save failed. Check Supabase RLS policies!");
+            }
 
         } else if (duplicatesSkipped > 0) {
             showToast(`Upload complete. No new data found. Skipped ${duplicatesSkipped} exact duplicates.`);
         } else {
-            showToast("Warning: Uploaded file contained no valid date entries in 'createdOn' column.");
+            showToast("Warning: Uploaded file contained no valid date entries.");
         }
       } catch (err) {
         console.error("Parse Error:", err);
@@ -380,12 +440,14 @@ export default function App() {
     setDbData(initialRawDatabase); 
     const today = new Date().toISOString().split('T')[0];
     setFromDate(today); setToDate(today);
+    setSelectedZone('All'); setSelectedStatus('All');
 
     try {
-      await supabaseClient.from('railmadad_sync').update({ json_data: initialRawDatabase, last_updated: new Date().toISOString() }).eq('id', 1);
+      const { error } = await supabaseClient.from('railmadad_sync').upsert({ id: 1, json_data: initialRawDatabase, last_updated: new Date().toISOString() }, { onConflict: 'id' });
+      if (error) throw error;
       showToast("Database successfully wiped clean.");
     } catch (err) {
-      showToast("Error resetting database.");
+      showToast("⚠️ Local wipe succeeded, but Cloud Sync failed.");
     }
   };
 
@@ -480,14 +542,32 @@ export default function App() {
 
         <div className="bg-white border-b border-slate-200 px-4 md:px-8 py-4 flex flex-col lg:flex-row justify-between items-start lg:items-center space-y-4 lg:space-y-0 z-20 sticky top-0 md:top-0 shadow-sm">
            <h2 className="text-xl font-black text-slate-800 tracking-tight">{navItemsList.find(i => i.id === activeTab)?.label}</h2>
-           <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4 bg-slate-50 border border-slate-200 p-2 rounded-xl">
+           
+           <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-3 sm:space-y-0 sm:space-x-4 bg-slate-50 border border-slate-200 p-2 rounded-xl flex-wrap">
+              {/* Zone Filter */}
               <div className="flex items-center text-sm">
-                 <Calendar className="w-4 h-4 text-indigo-500 mr-2 shrink-0" />
-                 <span className="font-bold text-slate-600 mr-2 text-xs uppercase tracking-wider">From</span>
+                 <Filter className="w-4 h-4 text-indigo-500 mr-2 shrink-0" />
+                 <span className="font-bold text-slate-600 mr-2 text-[10px] uppercase tracking-wider">Zone</span>
+                 <select value={selectedZone} onChange={e => setSelectedZone(e.target.value)} className="bg-white border border-slate-200 rounded px-2 py-1 text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer font-medium max-w-[100px]">
+                    <option value="All">All</option>
+                    {availableZones.map(z => <option key={z} value={z}>{z}</option>)}
+                 </select>
+              </div>
+              {/* Status Filter */}
+              <div className="flex items-center text-sm">
+                 <span className="font-bold text-slate-600 mx-2 text-[10px] uppercase tracking-wider">Status</span>
+                 <select value={selectedStatus} onChange={e => setSelectedStatus(e.target.value)} className="bg-white border border-slate-200 rounded px-2 py-1 text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer font-medium max-w-[100px]">
+                    <option value="All">All</option>
+                    {availableStatuses.map(s => <option key={s} value={s}>{s}</option>)}
+                 </select>
+              </div>
+              {/* Date Filters */}
+              <div className="flex items-center text-sm">
+                 <span className="font-bold text-slate-600 mx-2 text-[10px] uppercase tracking-wider">From</span>
                  <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="bg-white border border-slate-200 rounded px-2 py-1 text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer font-medium" />
               </div>
               <div className="flex items-center text-sm">
-                 <span className="font-bold text-slate-600 mx-2 text-xs uppercase tracking-wider">To</span>
+                 <span className="font-bold text-slate-600 mx-2 text-[10px] uppercase tracking-wider">To</span>
                  <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="bg-white border border-slate-200 rounded px-2 py-1 text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer font-medium" />
               </div>
            </div>
@@ -507,48 +587,70 @@ export default function App() {
           ) : !kpis || kpis.total === 0 ? (
              <div className="bg-white p-12 mt-10 rounded-2xl border border-slate-200 flex flex-col items-center justify-center text-center max-w-2xl mx-auto shadow-sm">
                <Calendar className="w-12 h-12 text-slate-300 mb-4" />
-               <h3 className="text-xl font-bold text-slate-800">No Data in Selected Timeline</h3>
-               <p className="text-slate-500 mt-2 max-w-sm">No complaints found between {fromDate} and {toDate}. Please expand your timeline filters or upload new raw data.</p>
+               <h3 className="text-xl font-bold text-slate-800">No Data Matches Filter</h3>
+               <p className="text-slate-500 mt-2 max-w-sm">Try expanding your dates or removing Zone/Status filters to see results.</p>
              </div>
           ) : (
             <>
-              {/* TAB 1: OVERVIEW & MoM */}
+              {/* TAB 1: OVERVIEW */}
               {activeTab === 'overview' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                     <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 border-l-4 border-l-blue-500">
-                        <p className="text-sm font-bold text-slate-500 mb-1 uppercase tracking-wider">Total Complaints</p>
+                        <p className="text-sm font-bold text-slate-500 mb-1 uppercase tracking-wider">Total Filtered Cases</p>
                         <h3 className="text-4xl font-black text-slate-800 tracking-tight">{kpis.total}</h3>
                     </div>
                     <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 border-l-4 border-l-emerald-500">
-                        <p className="text-sm font-bold text-slate-500 mb-1 uppercase tracking-wider">Resolution Rate</p>
-                        <h3 className="text-4xl font-black text-emerald-600 tracking-tight">{kpis.resolved}%</h3>
+                        <p className="text-sm font-bold text-slate-500 mb-1 uppercase tracking-wider">Avg Resolution Time</p>
+                        <h3 className="text-3xl font-black text-emerald-600 tracking-tight">{kpis.avgResTime}</h3>
                     </div>
                     <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 border-l-4 border-l-rose-500">
                         <p className="text-sm font-bold text-slate-500 mb-1 uppercase tracking-wider">Unsatisfactory Rate</p>
                         <h3 className="text-4xl font-black text-rose-600 tracking-tight">{kpis.unsat}%</h3>
                     </div>
                     <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 border-l-4 border-l-indigo-500">
-                        <p className="text-sm font-bold text-slate-500 mb-1 uppercase tracking-wider">Active Trains</p>
-                        <h3 className="text-4xl font-black text-indigo-600 tracking-tight">{trainData.length}</h3>
+                        <p className="text-sm font-bold text-slate-500 mb-1 uppercase tracking-wider">Resolution Rate</p>
+                        <h3 className="text-4xl font-black text-indigo-600 tracking-tight">{kpis.resolved}%</h3>
                     </div>
                   </div>
 
-                  <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                    <div className="flex items-center justify-between mb-6">
-                       <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Month-over-Month (MoM) Trend</h3>
-                       <BarChart3 className="text-slate-300 w-5 h-5"/>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    {/* MoM Bar Chart */}
+                    <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                      <div className="flex items-center justify-between mb-6">
+                         <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Month-over-Month (MoM) Volume Trend</h3>
+                         <BarChart3 className="text-slate-300 w-5 h-5"/>
+                      </div>
+                      <div className="h-80">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={momData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                            <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dy={10} />
+                            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
+                            <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                            <Bar dataKey="count" name="Total Complaints" fill="#3b82f6" radius={[6, 6, 0, 0]} barSize={50} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
                     </div>
-                    <div className="h-80">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={momData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                          <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dy={10} />
-                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
-                          <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
-                          <Bar dataKey="count" name="Total Complaints" fill="#3b82f6" radius={[6, 6, 0, 0]} barSize={50} />
-                        </BarChart>
-                      </ResponsiveContainer>
+
+                    {/* Status Chart */}
+                    <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                        <div className="flex items-center justify-between mb-6">
+                           <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Complaint Status Distribution</h3>
+                           <CheckCircle className="text-slate-300 w-5 h-5"/>
+                        </div>
+                        <div className="h-80">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie data={statusData} cx="50%" cy="50%" innerRadius={80} outerRadius={120} paddingAngle={4} dataKey="value">
+                                {statusData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
+                              </Pie>
+                              <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                              <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
                     </div>
                   </div>
                 </div>
@@ -587,7 +689,7 @@ export default function App() {
                        <h3 className="text-base font-bold text-rose-900">Pest Control & Rodent Target List</h3>
                     </div>
                     {pestTable.length === 0 ? (
-                      <div className="p-8 text-center text-slate-500 font-medium">No Pest Control/Rodent complaints identified in this period.</div>
+                      <div className="p-8 text-center text-slate-500 font-medium">No Pest Control/Rodent complaints identified in this period based on SubType/Description keywords.</div>
                     ) : (
                       <div className="overflow-x-auto max-h-96">
                         <table className="min-w-full text-left border-collapse">
@@ -663,7 +765,42 @@ export default function App() {
                 </div>
               )}
 
-              {/* TAB 4: SHIFTS & FEEDBACK */}
+              {/* TAB 4: GEO & COACH ANALYTICS */}
+              {activeTab === 'geo' && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Complaints by Railway Zone</h3>
+                    <div className="h-[400px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={zoneData} layout="vertical" margin={{ left: 20, right: 20 }}>
+                          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                          <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
+                          <YAxis dataKey="zone" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#334155', fontWeight: 600 }} />
+                          <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                          <Bar dataKey="count" name="Total Cases" fill="#f59e0b" radius={[0, 6, 6, 0]} barSize={20} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Complaints by Coach Type</h3>
+                    <div className="h-[400px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={coachData} layout="vertical" margin={{ left: 20, right: 20 }}>
+                          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                          <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
+                          <YAxis dataKey="coachType" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#334155', fontWeight: 600 }} />
+                          <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                          <Bar dataKey="count" name="Total Cases" fill="#10b981" radius={[0, 6, 6, 0]} barSize={20} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 5: SHIFTS & FEEDBACK */}
               {activeTab === 'operations' && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden h-fit">
@@ -685,11 +822,6 @@ export default function App() {
                           ))}
                         </tbody>
                       </table>
-                    </div>
-                    <div className="bg-indigo-50 border-t border-indigo-100 p-4 text-center">
-                      <p className="text-indigo-700 text-xs font-medium">
-                        Automatically calculated using the exact timestamp in the raw <b>createdOn</b> column.
-                      </p>
                     </div>
                   </div>
 
