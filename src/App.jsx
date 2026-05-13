@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
   LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -13,17 +13,15 @@ import {
 } from 'lucide-react';
 
 // ──────────────────────────────────────────────────────────────────
-// CONFIG (Note: in production, move these to env variables)
+// CONFIG
 // ──────────────────────────────────────────────────────────────────
 const SUPABASE_URL = 'https://npfuxifktdmxmzprfcxm.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZnV4aWZrdGRteG16cHJmY3htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2MjMwMDMsImV4cCI6MjA5NDE5OTAwM30.cCheIUxTAQWyoVyIwOLRd5usiyFI-q2GIn3A9NPFL78';
 
 const COLORS = ['#6366f1', '#8b5cf6', '#0ea5e9', '#f59e0b', '#ef4444', '#10b981', '#f43f5e', '#a855f7', '#ec4899', '#14b8a6'];
 
-// Initial empty database
 const initialRawDatabase = { records: [] };
 
-// Word cloud stopwords (Added boilerplate AI/system terms)
 const STOP_WORDS = new Set([
   'and', 'the', 'was', 'for', 'that', 'with', 'from', 'this', 'have', 'not',
   'are', 'but', 'has', 'had', 'been', 'very', 'they', 'will', 'coach', 'train',
@@ -32,8 +30,46 @@ const STOP_WORDS = new Set([
 ]);
 
 // ──────────────────────────────────────────────────────────────────
-// HELPERS
+// FORMATTERS & HELPERS
 // ──────────────────────────────────────────────────────────────────
+const formatHumanDate = (dateStr) => {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr);
+  if (isNaN(d)) return dateStr;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+};
+
+const formatChartDate = (dateStr) => {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d)) return dateStr;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${d.getDate()} ${months[d.getMonth()]}`;
+};
+
+const formatTime = (mins) => {
+  if (!mins && mins !== 0) return '—';
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+};
+
+const formatCategory = (cat) => {
+  if (!cat) return '—';
+  return cat.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\b\w/g, l => l.toUpperCase()).trim();
+};
+
+const cleanFeedbackText = (desc, feedback) => {
+  let d = String(desc || '').replace(/AI Generated Complaint Description:?\s*/i, '').trim();
+  let f = String(feedback || '').replace(/Complaint User Input:?\s*/i, '').trim();
+  let combined = d;
+  if (f) combined += ` (User: ${f})`;
+  return combined || '—';
+};
+
 const parseRawDate = (raw) => {
   if (!raw) return null;
   const str = String(raw).trim();
@@ -83,21 +119,16 @@ const getWeekKey = (dateStr) => {
   return `${d.getFullYear()}-W${String(week).padStart(2, '0')}`;
 };
 
-// Heatmap Color Generator Helper
 const getHeatmapColor = (val, max, type) => {
   if (!val) return { bg: 'transparent', text: 'inherit' };
   const intensity = Math.max(0.1, val / max);
   const isDark = intensity > 0.55;
-
-  if (type === 'blue') {
-     return { bg: `rgba(59, 130, 246, ${intensity})`, text: isDark ? '#ffffff' : 'inherit' };
-  } else {
-     return { bg: `rgba(239, 68, 68, ${intensity})`, text: isDark ? '#ffffff' : 'inherit' };
-  }
+  if (type === 'blue') return { bg: `rgba(59, 130, 246, ${intensity})`, text: isDark ? '#ffffff' : 'inherit' };
+  return { bg: `rgba(239, 68, 68, ${intensity})`, text: isDark ? '#ffffff' : 'inherit' };
 };
 
 // ──────────────────────────────────────────────────────────────────
-// NAVIGATION
+// COMPONENTS
 // ──────────────────────────────────────────────────────────────────
 const navItemsList = [
   { id: 'executive', label: 'Executive Overview', icon: LayoutDashboard },
@@ -107,9 +138,6 @@ const navItemsList = [
   { id: 'sentiment', label: 'Passenger Sentiment', icon: MessageSquareWarning },
 ];
 
-// ──────────────────────────────────────────────────────────────────
-// REUSABLE COMPONENTS
-// ──────────────────────────────────────────────────────────────────
 const MetricCard = ({ title, value, todayValue, icon: Icon, accent, sparkColor, sparklineData, dataKey }) => (
   <div className="relative bg-white dark:bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col justify-between overflow-hidden transition-colors h-32">
     <div className="relative z-10 flex justify-between items-start mb-1">
@@ -121,13 +149,11 @@ const MetricCard = ({ title, value, todayValue, icon: Icon, accent, sparkColor, 
         <Icon className="w-5 h-5 text-white" />
       </div>
     </div>
-    
     <div className="relative z-10 flex items-center">
         <span className="text-xs font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700">
            Today: {todayValue}
         </span>
     </div>
-
     {sparklineData && sparklineData.length > 0 && (
       <div className="absolute bottom-0 left-0 right-0 h-16 opacity-30 pointer-events-none">
         <ResponsiveContainer width="100%" height="100%">
@@ -152,6 +178,84 @@ const Card = ({ title, icon: Icon, children, className = '' }) => (
   </div>
 );
 
+const ExpandableText = ({ text }) => {
+  const [expanded, setExpanded] = useState(false);
+  if (!text || text === '—') return <span className="text-slate-500">—</span>;
+  const isLong = text.length > 120;
+  return (
+    <div>
+      <span className={`text-slate-600 dark:text-slate-300 ${!expanded && isLong ? 'line-clamp-3' : ''}`}>
+        {text}
+      </span>
+      {isLong && (
+        <button onClick={() => setExpanded(!expanded)} className="text-xs font-bold text-indigo-600 dark:text-indigo-400 mt-1 hover:underline">
+          {expanded ? 'Show Less' : 'Read More...'}
+        </button>
+      )}
+    </div>
+  );
+};
+
+const MultiSelectDropdown = ({ label, options, selected, onChange, activeId, setActiveId, id }) => {
+  const isOpen = activeId === id;
+  const toggleOption = (opt) => {
+    if (selected.includes(opt)) onChange(selected.filter(o => o !== opt));
+    else onChange([...selected, opt]);
+  };
+  const displayText = selected.length === 0 || selected.length === options.length 
+      ? 'All Selected' : selected.length === 1 ? selected[0] : `${selected.length} Selected`;
+
+  return (
+    <div className="relative flex flex-col">
+      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">{label}</span>
+      <button 
+         onClick={() => setActiveId(isOpen ? null : id)}
+         className="flex items-center justify-between text-sm border border-slate-200 dark:border-slate-700 rounded p-1.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 outline-none hover:border-indigo-400"
+      >
+         <span className="truncate max-w-[120px]">{displayText}</span>
+         <ChevronDown className="w-3 h-3 ml-1 text-slate-400" />
+      </button>
+      
+      {isOpen && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setActiveId(null)}></div>
+          <div className="absolute top-full left-0 mt-1 w-56 max-h-60 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl z-50 p-2 flex flex-col custom-scrollbar">
+             <div className="flex justify-between mb-2 pb-2 border-b border-slate-100 dark:border-slate-700">
+                <button onClick={() => onChange([...options])} className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline">Select All</button>
+                <button onClick={() => onChange([])} className="text-xs font-bold text-slate-500 hover:underline">Clear</button>
+             </div>
+             {options.map(o => (
+                <label key={String(o)} className="flex items-start py-1.5 px-1 hover:bg-slate-50 dark:hover:bg-slate-700 rounded cursor-pointer">
+                  <input 
+                     type="checkbox" 
+                     checked={selected.includes(o)} 
+                     onChange={() => toggleOption(o)}
+                     className="mt-0.5 mr-2 rounded text-indigo-600 focus:ring-indigo-500 bg-slate-100 dark:bg-slate-900 border-slate-300 dark:border-slate-600"
+                  />
+                  <span className="text-sm text-slate-700 dark:text-slate-200 leading-tight">{formatCategory(String(o))}</span>
+                </label>
+             ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+const ScatterTooltip = ({ active, payload }) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-3 rounded-lg shadow-lg">
+        <p className="font-bold text-slate-800 dark:text-white mb-1">Ref: {data.name}</p>
+        <p className="text-sm font-medium text-slate-600 dark:text-slate-300">{formatCategory(data.category)}</p>
+        <p className="text-sm font-black text-indigo-600 dark:text-indigo-400 mt-1">{formatTime(data.time)} to resolve</p>
+      </div>
+    );
+  }
+  return null;
+};
+
 // ──────────────────────────────────────────────────────────────────
 // LOGIN COMPONENT
 // ──────────────────────────────────────────────────────────────────
@@ -159,7 +263,7 @@ const LoginScreen = ({ onLogin, supabaseClient }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [mode, setMode] = useState('signin'); // 'signin' | 'signup'
+  const [mode, setMode] = useState('signin');
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [busy, setBusy] = useState(false);
@@ -197,21 +301,9 @@ const LoginScreen = ({ onLogin, supabaseClient }) => {
         </div>
 
         <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-100 dark:border-slate-800 p-7">
-          <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-1 mb-6">
-            <button
-              type="button"
-              onClick={() => { setMode('signin'); setError(''); setInfo(''); }}
-              className={`flex-1 py-2 text-sm font-bold rounded-md transition-all ${mode === 'signin' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-white shadow' : 'text-slate-500 dark:text-slate-400'}`}
-            >
-              Sign In
-            </button>
-            <button
-              type="button"
-              onClick={() => { setMode('signup'); setError(''); setInfo(''); }}
-              className={`flex-1 py-2 text-sm font-bold rounded-md transition-all ${mode === 'signup' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-white shadow' : 'text-slate-500 dark:text-slate-400'}`}
-            >
-              Sign Up
-            </button>
+          <div className="flex bg-slate-100 dark:bg-slate-800 rounded-full p-1 mb-6">
+            <button type="button" onClick={() => { setMode('signin'); setError(''); setInfo(''); }} className={`flex-1 py-2 text-sm font-bold rounded-full transition-all ${mode === 'signin' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-white shadow' : 'text-slate-500 dark:text-slate-400'}`}>Sign In</button>
+            <button type="button" onClick={() => { setMode('signup'); setError(''); setInfo(''); }} className={`flex-1 py-2 text-sm font-bold rounded-full transition-all ${mode === 'signup' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-white shadow' : 'text-slate-500 dark:text-slate-400'}`}>Sign Up</button>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -219,63 +311,28 @@ const LoginScreen = ({ onLogin, supabaseClient }) => {
               <label className="text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1.5 block">Email</label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-10 pr-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="you@railway.gov.in"
-                />
+                <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-10 pr-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="you@railway.gov.in" />
               </div>
             </div>
-
             <div>
               <label className="text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1.5 block">Password</label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  minLength={6}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-10 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="••••••••"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                >
+                <input type={showPassword ? 'text' : 'password'} required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} className="w-full pl-10 pr-10 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="••••••••" />
+                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>
 
-            {error && (
-              <div className="bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs font-medium p-3 rounded-lg">
-                {error}
-              </div>
-            )}
-            {info && (
-              <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300 text-xs font-medium p-3 rounded-lg">
-                {info}
-              </div>
-            )}
+            {error && <div className="bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs font-medium p-3 rounded-lg">{error}</div>}
+            {info && <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300 text-xs font-medium p-3 rounded-lg">{info}</div>}
 
-            <button
-              type="submit"
-              disabled={busy}
-              className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center"
-            >
+            <button type="submit" disabled={busy} className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm transition-colors disabled:opacity-60 flex items-center justify-center">
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : mode === 'signin' ? 'Sign In' : 'Create Account'}
             </button>
           </form>
-
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 text-center mt-5">
-            Secured by Supabase Auth. Your session is encrypted end-to-end.
-          </p>
+          <p className="text-[11px] text-slate-400 dark:text-slate-500 text-center mt-5">Secured by Supabase Auth.</p>
         </div>
       </div>
     </div>
@@ -286,21 +343,18 @@ const LoginScreen = ({ onLogin, supabaseClient }) => {
 // MAIN APP
 // ──────────────────────────────────────────────────────────────────
 export default function App() {
-  // Auth state
   const [session, setSession] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [supabaseClient, setSupabaseClient] = useState(null);
-
-  // Theme state
   const [theme, setTheme] = useState(() => {
     if (typeof window === 'undefined') return 'light';
     return localStorage.getItem('railmadad_theme') || 'light';
   });
 
-  // UI state
   const [activeTab, setActiveTab] = useState('executive');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  const [activeDropdown, setActiveDropdown] = useState(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -308,18 +362,16 @@ export default function App() {
   const [dbData, setDbData] = useState(initialRawDatabase);
   const [toastMessage, setToastMessage] = useState('');
   const [showResetModal, setShowResetModal] = useState(false);
-  const [trendsGranularity, setTrendsGranularity] = useState('day'); // day | week | month
+  const [trendsGranularity, setTrendsGranularity] = useState('day'); 
 
-  // Filters state
   const todayStr = new Date().toISOString().split('T')[0];
   const lastMonthStr = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   const [filters, setFilters] = useState({
     fromDate: lastMonthStr, toDate: todayStr,
-    timeBucket: 'All', train: 'All', coachType: 'All', zone: 'All', location: 'All',
-    category: 'All', sla: 'All', rating: 'All', status: 'All'
+    timeBucket: [], train: [], coachType: [], zone: [], location: [],
+    category: [], sla: [], rating: [], status: []
   });
 
-  // ── Theme application
   useEffect(() => {
     const root = document.documentElement;
     if (theme === 'dark') root.classList.add('dark');
@@ -348,19 +400,14 @@ export default function App() {
     }
   };
 
-  // ── Data loading
   const loadLocalFallback = useCallback(() => {
     try {
       const localDataStr = localStorage.getItem('railmadad_local_sync');
       if (localDataStr) {
         const localData = JSON.parse(localDataStr);
         applyDashboardData(localData, 'Loaded from Local Cache');
-      } else {
-        setLastSync('Empty');
-      }
-    } catch {
-      setLastSync('Local cache error');
-    }
+      } else setLastSync('Empty');
+    } catch { setLastSync('Local cache error'); }
     setIsLoading(false);
   }, []);
 
@@ -371,77 +418,40 @@ export default function App() {
       if (data && data.json_data && data.json_data.records) {
         applyDashboardData(data.json_data, new Date(data.last_updated || Date.now()).toLocaleTimeString());
         localStorage.setItem('railmadad_local_sync', JSON.stringify(data.json_data));
-      } else {
-        loadLocalFallback();
-      }
-    } catch {
-      loadLocalFallback();
-    } finally {
-      setIsLoading(false);
-    }
+      } else loadLocalFallback();
+    } catch { loadLocalFallback(); } 
+    finally { setIsLoading(false); }
   }, [loadLocalFallback]);
 
   useEffect(() => {
     const loadDependencies = async () => {
       try {
         if (!window.XLSX) {
-          await new Promise((res) => {
-            const script = document.createElement('script');
-            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-            script.onload = res;
-            document.head.appendChild(script);
-          });
+          await new Promise((res) => { const script = document.createElement('script'); script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; script.onload = res; document.head.appendChild(script); });
         }
         if (!window.supabase) {
-          await new Promise((res) => {
-            const script = document.createElement('script');
-            script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
-            script.onload = res;
-            document.head.appendChild(script);
-          });
+          await new Promise((res) => { const script = document.createElement('script'); script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'; script.onload = res; document.head.appendChild(script); });
         }
         if (!window.jspdf) {
-          await new Promise((res) => {
-            const script = document.createElement('script');
-            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-            script.onload = res;
-            document.head.appendChild(script);
-          });
+          await new Promise((res) => { const script = document.createElement('script'); script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'; script.onload = res; document.head.appendChild(script); });
         }
         if (!window.jspdf || !window.jspdf.jsPDF.API.autoTable) {
-          await new Promise((res) => {
-            const script = document.createElement('script');
-            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js';
-            script.onload = res;
-            document.head.appendChild(script);
-          });
+          await new Promise((res) => { const script = document.createElement('script'); script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js'; script.onload = res; document.head.appendChild(script); });
         }
-        
         const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
         setSupabaseClient(client);
-
-        client.auth.getSession().then(({ data }) => {
-          setSession(data.session);
-          setAuthChecked(true);
-        });
-        
-        client.auth.onAuthStateChange((_event, s) => {
-          setSession(s);
-        });
-        
+        client.auth.getSession().then(({ data }) => { setSession(data.session); setAuthChecked(true); });
+        client.auth.onAuthStateChange((_event, s) => { setSession(s); });
       } catch (err) {
         console.error("Dependency loading failed", err);
-        loadLocalFallback();
-        setAuthChecked(true); // Ensure UI loads even if scripts fail
+        loadLocalFallback(); setAuthChecked(true);
       }
     };
     loadDependencies();
   }, [loadLocalFallback]);
 
   useEffect(() => {
-    if (session && supabaseClient) {
-      fetchCloudData(supabaseClient);
-    }
+    if (session && supabaseClient) fetchCloudData(supabaseClient);
   }, [session, supabaseClient, fetchCloudData]);
 
   // ── CORE AGGREGATOR
@@ -469,24 +479,23 @@ export default function App() {
 
     const validRecords = rawRecords.filter((r) => {
       if (r.date < filters.fromDate || r.date > filters.toDate) return false;
-      if (filters.timeBucket !== 'All' && r.shift2 !== filters.timeBucket) return false;
-      if (filters.train !== 'All' && r.train !== filters.train) return false;
-      if (filters.coachType !== 'All' && r.coachType !== filters.coachType) return false;
-      if (filters.zone !== 'All' && r.zone !== filters.zone && r.ownZone !== filters.zone) return false;
-      if (filters.location !== 'All' && r.nextStation !== filters.location) return false;
-      if (filters.category !== 'All' && r.category !== filters.category) return false;
-      if (filters.sla !== 'All' && r.sla !== filters.sla) return false;
-      if (filters.rating !== 'All' && r.rating !== filters.rating) return false;
-      if (filters.status !== 'All' && r.status !== filters.status) return false;
+      if (filters.timeBucket.length > 0 && !filters.timeBucket.includes(r.shift2)) return false;
+      if (filters.train.length > 0 && !filters.train.includes(r.train)) return false;
+      if (filters.coachType.length > 0 && !filters.coachType.includes(r.coachType)) return false;
+      if (filters.zone.length > 0 && !filters.zone.includes(r.zone) && !filters.zone.includes(r.ownZone)) return false;
+      if (filters.location.length > 0 && !filters.location.includes(r.nextStation)) return false;
+      if (filters.category.length > 0 && !filters.category.includes(r.category)) return false;
+      if (filters.sla.length > 0 && !filters.sla.includes(r.sla)) return false;
+      if (filters.status.length > 0 && !filters.status.includes(r.status)) return false;
+      if (filters.rating.length > 0 && !filters.rating.includes(r.rating)) return false;
       return true;
     });
 
-    const targetToday = filters.toDate; // Use the end date filter as 'Today'
+    const targetToday = filters.toDate;
     const kpis = { total: validRecords.length, bedroll: 0, clean: 0, water: 0, maint: 0 };
     const kpisToday = { total: 0, bedroll: 0, clean: 0, water: 0, maint: 0 };
     
-    const dailySparkMap = new Map(); // { 'YYYY-MM-DD': { total: 0, bedroll: 0... } }
-    
+    const dailySparkMap = new Map();
     const trainCatMap = new Map();
     const zoneDivMap = new Map();
     const shiftCatMap = new Map();
@@ -505,15 +514,12 @@ export default function App() {
     const uniqueDivs = new Set();
     const scatterData = [];
 
-    // Trend mapping
     const dailyMap = new Map();
     const weeklyMap = new Map();
     const monthlyMap = new Map();
-    
     const catTrendMap = { day: new Map(), week: new Map(), month: new Map() };
     const slaTrendMap = { day: new Map(), week: new Map(), month: new Map() };
     
-    // Heatmap Max Values
     let maxZoneDivValue = 0;
     let maxTrainCatValue = 0;
     let maxShiftVal = 0;
@@ -522,36 +528,24 @@ export default function App() {
       const catLow = String(r.category).toLowerCase();
       const isToday = r.date === targetToday;
 
-      // Init sparkline map for this date
       if (!dailySparkMap.has(r.date)) dailySparkMap.set(r.date, { date: r.date, total: 0, bedroll: 0, clean: 0, water: 0, maint: 0 });
       const sparkObj = dailySparkMap.get(r.date);
       sparkObj.total++;
       if (isToday) kpisToday.total++;
 
-      // Global & Daily KPI Counting
-      if (catLow.includes('bedroll') || catLow.includes('linen')) { 
-          kpis.bedroll++; sparkObj.bedroll++; if(isToday) kpisToday.bedroll++; 
-      }
-      if (catLow.includes('clean') || catLow.includes('dirt')) { 
-          kpis.clean++; sparkObj.clean++; if(isToday) kpisToday.clean++; 
-      }
-      if (catLow.includes('water') || catLow.includes('plumb')) { 
-          kpis.water++; sparkObj.water++; if(isToday) kpisToday.water++; 
-      }
-      if (catLow.includes('maintain') || catLow.includes('coach') || catLow.includes('equip')) { 
-          kpis.maint++; sparkObj.maint++; if(isToday) kpisToday.maint++; 
-      }
+      if (catLow.includes('bedroll') || catLow.includes('linen')) { kpis.bedroll++; sparkObj.bedroll++; if(isToday) kpisToday.bedroll++; }
+      if (catLow.includes('clean') || catLow.includes('dirt')) { kpis.clean++; sparkObj.clean++; if(isToday) kpisToday.clean++; }
+      if (catLow.includes('water') || catLow.includes('plumb')) { kpis.water++; sparkObj.water++; if(isToday) kpisToday.water++; }
+      if (catLow.includes('maintain') || catLow.includes('coach') || catLow.includes('equip')) { kpis.maint++; sparkObj.maint++; if(isToday) kpisToday.maint++; }
 
       uniqueCats.add(String(r.category));
 
-      // Train Matrix (with max value tracking for Heatmap)
       if (!trainCatMap.has(r.train)) trainCatMap.set(r.train, { train: r.train, Total: 0 });
       const tObj = trainCatMap.get(r.train);
       tObj.Total++; 
       tObj[r.category] = (tObj[r.category] || 0) + 1;
       if (tObj[r.category] > maxTrainCatValue) maxTrainCatValue = tObj[r.category];
 
-      // Zone Correlation Matrix (with max value tracking for Heatmap)
       uniqueDivs.add(String(r.div));
       if (!zoneDivMap.has(r.ownZone)) zoneDivMap.set(r.ownZone, { zone: r.ownZone, Total: 0 });
       const zObj = zoneDivMap.get(r.ownZone);
@@ -600,7 +594,6 @@ export default function App() {
         if (w.length > 3 && !STOP_WORDS.has(w)) wordMap.set(w, (wordMap.get(w) || 0) + 1);
       });
 
-      // Trends Tab
       const dKey = r.date;
       const wKey = getWeekKey(r.date);
       const mKey = r.month;
@@ -608,40 +601,28 @@ export default function App() {
       weeklyMap.set(wKey, (weeklyMap.get(wKey) || 0) + 1);
       monthlyMap.set(mKey, (monthlyMap.get(mKey) || 0) + 1);
 
-      // Track categories and SLAs across Day, Week, and Month for Tab 3
       const keys = { day: dKey, week: wKey, month: mKey };
       ['day', 'week', 'month'].forEach((g) => {
         const key = keys[g];
-        // Category Trend
         if (!catTrendMap[g].has(key)) catTrendMap[g].set(key, { date: key });
         const ctObj = catTrendMap[g].get(key);
         ctObj[r.category] = (ctObj[r.category] || 0) + 1;
 
-        // SLA Performance Trend
         if (!slaTrendMap[g].has(key)) slaTrendMap[g].set(key, { date: key, OnTime: 0, Breached: 0 });
         const slaObj = slaTrendMap[g].get(key);
-        // Strictly defined: > 30 mins is Breached, <= 30 mins is OnTime
-        if (r.resTimeMins > 30) {
-          slaObj.Breached++;
-        } else {
-          slaObj.OnTime++;
-        }
+        if (r.resTimeMins > 30) slaObj.Breached++;
+        else slaObj.OnTime++;
       });
     });
 
     const uniqueCatsArray = Array.from(uniqueCats).sort();
     const uniqueDivsArray = Array.from(uniqueDivs).sort();
     
-    // Sort tables by volume
     const trainMatrix = Array.from(trainCatMap.values()).sort((a, b) => b.Total - a.Total);
     const zoneDivMatrix = Array.from(zoneDivMap.values()).sort((a, b) => b.Total - a.Total);
-    
-    // Convert sparkline map to sorted array
     const sparklineArray = Array.from(dailySparkMap.values()).sort((a,b) => a.date.localeCompare(b.date));
-
     const shiftHeatmap = Array.from(shiftCatMap.values()).sort((a, b) => String(a.shift).localeCompare(String(b.shift)));
     
-    // Sorted descending so highest average minute categories appear at the TOP of the Recharts vertical BarChart
     const resSpeedBar = Array.from(catResMap.values())
       .map((c) => ({ category: String(c.category), avgMins: Math.round(c.sum / c.count) }))
       .sort((a, b) => b.avgMins - a.avgMins); 
@@ -651,7 +632,6 @@ export default function App() {
       .sort((a, b) => b.count - a.count).slice(0, 15);
     const coachMatrix = Array.from(coachCatMap.values()).sort((a, b) => b.Total - a.Total);
     
-    // Calculate 100% Stacked Bar Data for Quick Close
     const quickCloseData = [quickCloseMap['< 15m'], quickCloseMap['15-60m'], quickCloseMap['> 60m']].map(bucket => {
       const total = bucket.Satisfactory + bucket.Neutral + bucket.Unsatisfactory;
       return {
@@ -667,40 +647,27 @@ export default function App() {
       .sort((a, b) => b.value - a.value).slice(0, 40)
       .map((w) => ({ ...w, fontSize: Math.max(12, Math.min(48, w.value * 1.5)) }));
 
-    // Top 5 Categories dynamically found for use in Trends area
     const topCats = Array.from(catResMap.keys()).slice(0, 5);
 
-    // Trend arrays
     const dailyTrendRaw = Array.from(dailyMap.entries())
       .map(([date, count]) => ({ key: date, count }))
       .sort((a, b) => a.key.localeCompare(b.key));
       
-    // Calculate 7-Day Moving Average for Daily Trend
     const dailyTrend = dailyTrendRaw.map((day, i, arr) => {
-      let sum = 0;
-      let count = 0;
-      for (let j = Math.max(0, i - 6); j <= i; j++) {
-        sum += arr[j].count;
-        count++;
-      }
+      let sum = 0, count = 0;
+      for (let j = Math.max(0, i - 6); j <= i; j++) { sum += arr[j].count; count++; }
       return { ...day, movingAvg: Math.round(sum / count) };
     });
 
-    const weeklyTrend = Array.from(weeklyMap.entries())
-      .map(([key, count]) => ({ key, count }))
-      .sort((a, b) => a.key.localeCompare(b.key));
-    const monthlyTrend = Array.from(monthlyMap.entries())
-      .map(([key, count]) => ({ key, count }))
-      .sort((a, b) => a.key.localeCompare(b.key));
+    const weeklyTrend = Array.from(weeklyMap.entries()).map(([key, count]) => ({ key, count })).sort((a, b) => a.key.localeCompare(b.key));
+    const monthlyTrend = Array.from(monthlyMap.entries()).map(([key, count]) => ({ key, count })).sort((a, b) => a.key.localeCompare(b.key));
 
-    // Dynamic Category Trends based on Granularity Mapping
     const categoryTrend = {
       day: Array.from(catTrendMap.day.values()).sort((a, b) => a.date.localeCompare(b.date)),
       week: Array.from(catTrendMap.week.values()).sort((a, b) => a.date.localeCompare(b.date)),
       month: Array.from(catTrendMap.month.values()).sort((a, b) => a.date.localeCompare(b.date)),
     };
 
-    // Calculate Compliance Percentage function for SLA Trend
     const calcCompliance = (item) => ({
       ...item,
       Compliance: (item.OnTime + item.Breached) > 0 ? Math.round((item.OnTime / (item.OnTime + item.Breached)) * 100) : 0
@@ -926,12 +893,12 @@ export default function App() {
     doc.setFontSize(14);
     doc.text('RailMadad Dashboard — Filtered Export', 14, 14);
     doc.setFontSize(9);
-    doc.text(`Generated: ${new Date().toLocaleString()}  |  Rows: ${validRecords.length}`, 14, 20);
-    doc.text(`Date Range: ${filters.fromDate} → ${filters.toDate}`, 14, 25);
+    doc.text(`Generated: ${formatHumanDate(todayStr)}  |  Rows: ${validRecords.length}`, 14, 20);
+    doc.text(`Date Range: ${formatHumanDate(filters.fromDate)} → ${formatHumanDate(filters.toDate)}`, 14, 25);
 
     const headers = ['Ref No', 'Date', 'Train', 'Category', 'Coach', 'Status', 'SLA', 'Rating'];
     const body = validRecords.slice(0, 1000).map((r) => [
-      r.id, r.date, r.train, r.category, `${r.coachType}-${r.coachNo}`, r.status, r.sla, r.rating
+      r.id, formatHumanDate(r.date), r.train, formatCategory(r.category), `${r.coachType}-${r.coachNo}`, r.status, r.sla, r.rating
     ]);
     doc.autoTable({
       head: [headers], body, startY: 30,
@@ -971,45 +938,39 @@ export default function App() {
     );
   }
 
-  // Determine current active granularity trend data
-  const baseTrendData = trendsGranularity === 'day' ? dailyTrend
-    : trendsGranularity === 'week' ? weeklyTrend
-      : monthlyTrend;
+  const baseTrendData = trendsGranularity === 'day' ? dailyTrend : trendsGranularity === 'week' ? weeklyTrend : monthlyTrend;
 
-  // Enhance with Peak Labels (local maxima) for the volume chart
   const trendData = baseTrendData.map((d, i, arr) => {
     const prev = arr[i - 1]?.count ?? -1;
     const next = arr[i + 1]?.count ?? -1;
-    // Local peak definition: strictly greater than previous, and >= next.
     const isPeak = d.count > prev && d.count >= next && d.count > 0;
-    return {
-      ...d,
-      peakLabel: isPeak ? d.count : ''
-    };
+    return { ...d, peakLabel: isPeak ? d.count : '' };
   });
 
-  // Granularity dynamic label (e.g. "Daily", "Weekly", "Monthly")
   const granularityLabel = trendsGranularity === 'day' ? 'Daily' : trendsGranularity.charAt(0).toUpperCase() + trendsGranularity.slice(1) + 'ly';
-
-  // Build category trend pivot for chart (top 5 categories) dynamically based on selected granularity
   const currentCategoryTrend = categoryTrend[trendsGranularity] || [];
   const categoryTrendChartData = currentCategoryTrend.map((row) => {
     const obj = { date: row.date };
-    topCats.forEach((c) => { obj[c] = row[c] || 0; });
+    topCats.forEach((c) => { obj[String(c)] = row[c] || 0; });
     return obj;
   });
 
-  // Pull SLA performance trend dynamically based on selected granularity
   const currentSlaTrend = slaTrend[trendsGranularity] || [];
-
   const axisStyle = { fontSize: 11, fill: theme === 'dark' ? '#94a3b8' : '#64748b' };
   const gridStroke = theme === 'dark' ? '#1e293b' : '#f1f5f9';
-  
-  // Calculate dynamic max specifically for the watering heatmap scaling
   const maxWateringVal = wateringList.length > 0 ? Math.max(...wateringList.map(w => w.count)) : 1;
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col md:flex-row font-sans text-slate-900 dark:text-slate-100 relative transition-colors">
+      
+      {/* Global CSS Inject for Custom Scrollbars */}
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #475569; }
+      `}</style>
+
       {/* Toast */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 bg-slate-800 dark:bg-slate-700 text-white px-5 py-3 rounded-xl shadow-2xl z-50 flex items-center border border-slate-700 dark:border-slate-600 animate-slide-up">
@@ -1074,7 +1035,7 @@ export default function App() {
           </p>
         </div>
 
-        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+        <nav className="flex-1 p-4 space-y-1 overflow-y-auto custom-scrollbar">
           <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-3 ml-2">Modules</p>
           {navItemsList.map((item) => {
             const Icon = item.icon;
@@ -1117,9 +1078,6 @@ export default function App() {
           >
             <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Wipe Entire System
           </button>
-          <p className="text-[10px] text-slate-400 dark:text-slate-500 text-center pt-1 truncate">
-            {session?.user?.email}
-          </p>
         </div>
       </aside>
 
@@ -1147,17 +1105,20 @@ export default function App() {
                   <ChevronDown className={`w-4 h-4 ml-1 transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
                 </button>
                 {showExportMenu && (
-                  <div className="absolute right-0 mt-2 w-44 bg-white dark:bg-slate-900 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 overflow-hidden z-30">
-                    <button onClick={exportCSV} className="w-full flex items-center px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
-                      <FileText className="w-4 h-4 mr-2 text-slate-400" /> CSV
-                    </button>
-                    <button onClick={exportExcel} className="w-full flex items-center px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
-                      <FileSpreadsheet className="w-4 h-4 mr-2 text-emerald-500" /> Excel
-                    </button>
-                    <button onClick={exportPDF} className="w-full flex items-center px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
-                      <FileBarChart className="w-4 h-4 mr-2 text-rose-500" /> PDF
-                    </button>
-                  </div>
+                  <>
+                    <div className="fixed inset-0 z-20" onClick={() => setShowExportMenu(false)}></div>
+                    <div className="absolute right-0 mt-2 w-44 bg-white dark:bg-slate-900 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 overflow-hidden z-30">
+                      <button onClick={exportCSV} className="w-full flex items-center px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                        <FileText className="w-4 h-4 mr-2 text-slate-400" /> CSV
+                      </button>
+                      <button onClick={exportExcel} className="w-full flex items-center px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                        <FileSpreadsheet className="w-4 h-4 mr-2 text-emerald-500" /> Excel
+                      </button>
+                      <button onClick={exportPDF} className="w-full flex items-center px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                        <FileBarChart className="w-4 h-4 mr-2 text-rose-500" /> PDF
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
               <button
@@ -1171,10 +1132,17 @@ export default function App() {
           </div>
 
           {showFilters && (
-            <div className="px-4 md:px-8 py-4 bg-slate-50 dark:bg-slate-900/60 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 border-b border-slate-200 dark:border-slate-800">
+            <div className="px-4 md:px-8 py-4 bg-slate-50 dark:bg-slate-900/60 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 border-b border-slate-200 dark:border-slate-800 relative z-30">
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">From Date</span>
+                <input type="date" value={filters.fromDate} onChange={(e) => updateFilter('fromDate', e.target.value)} className="text-sm border border-slate-200 dark:border-slate-700 rounded p-1.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 outline-none focus:ring-1 focus:ring-indigo-500" />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">To Date</span>
+                <input type="date" value={filters.toDate} onChange={(e) => updateFilter('toDate', e.target.value)} className="text-sm border border-slate-200 dark:border-slate-700 rounded p-1.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 outline-none focus:ring-1 focus:ring-indigo-500" />
+              </div>
+              
               {[
-                { lbl: 'From Date', key: 'fromDate', type: 'date' },
-                { lbl: 'To Date', key: 'toDate', type: 'date' },
                 { lbl: 'Time Bucket', key: 'timeBucket', src: 'buckets' },
                 { lbl: 'Train', key: 'train', src: 'trains' },
                 { lbl: 'Coach Type', key: 'coachType', src: 'coaches' },
@@ -1185,35 +1153,23 @@ export default function App() {
                 { lbl: 'Rating', key: 'rating', src: 'ratings' },
                 { lbl: 'Status', key: 'status', src: 'statuses' },
               ].map((f) => (
-                <div key={f.key} className="flex flex-col">
-                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">{f.lbl}</span>
-                  {f.type === 'date' ? (
-                    <input
-                      type="date"
-                      value={filters[f.key]}
-                      onChange={(e) => updateFilter(f.key, e.target.value)}
-                      className="text-sm border border-slate-200 dark:border-slate-700 rounded p-1.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 outline-none focus:ring-1 focus:ring-indigo-500"
-                    />
-                  ) : (
-                    <select
-                      value={filters[f.key]}
-                      onChange={(e) => updateFilter(f.key, e.target.value)}
-                      className="text-sm border border-slate-200 dark:border-slate-700 rounded p-1.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 outline-none focus:ring-1 focus:ring-indigo-500"
-                    >
-                      <option value="All">All</option>
-                      {Array.from(options[f.src] || []).sort().map((o) => (
-                        <option key={String(o)} value={String(o)}>{String(o)}</option>
-                      ))}
-                    </select>
-                  )}
-                </div>
+                <MultiSelectDropdown 
+                   key={f.key} 
+                   id={f.key}
+                   activeId={activeDropdown}
+                   setActiveId={setActiveDropdown}
+                   label={f.lbl} 
+                   options={Array.from(options[f.src] || []).sort()} 
+                   selected={filters[f.key]} 
+                   onChange={(val) => updateFilter(f.key, val)} 
+                />
               ))}
             </div>
           )}
         </div>
 
         {/* MAIN CONTENT */}
-        <div className="p-4 md:p-8 flex-1 overflow-y-auto space-y-8">
+        <div className="p-4 md:p-8 flex-1 overflow-y-auto space-y-8 custom-scrollbar">
           {dbData.records.length === 0 ? (
             <div className="bg-white dark:bg-slate-900 p-16 mt-10 rounded-3xl border border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center text-center max-w-2xl mx-auto shadow-sm">
               <div className="w-24 h-24 bg-indigo-50 dark:bg-indigo-950/40 rounded-full flex items-center justify-center mb-6">
@@ -1236,37 +1192,22 @@ export default function App() {
               {activeTab === 'executive' && (
                 <div className="space-y-8 animate-fade-in">
                   
-                  {/* KPI TILES (WITH DUAL METRICS & SPARKLINES) */}
+                  {/* KPI TILES */}
                   <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-6">
-                    <MetricCard 
-                       title="Total Volume" value={kpis.total} todayValue={kpisToday.total} icon={LayoutDashboard} 
-                       accent="bg-indigo-600" sparkColor="#4f46e5" sparklineData={sparklineArray} dataKey="total" 
-                    />
-                    <MetricCard 
-                       title="Bedroll" value={kpis.bedroll} todayValue={kpisToday.bedroll} icon={Sparkles} 
-                       accent="bg-purple-600" sparkColor="#9333ea" sparklineData={sparklineArray} dataKey="bedroll" 
-                    />
-                    <MetricCard 
-                       title="Cleanliness" value={kpis.clean} todayValue={kpisToday.clean} icon={Sparkles} 
-                       accent="bg-emerald-600" sparkColor="#10b981" sparklineData={sparklineArray} dataKey="clean" 
-                    />
-                    <MetricCard 
-                       title="Watering" value={kpis.water} todayValue={kpisToday.water} icon={Sparkles} 
-                       accent="bg-sky-600" sparkColor="#0284c7" sparklineData={sparklineArray} dataKey="water" 
-                    />
-                    <MetricCard 
-                       title="Maintenance" value={kpis.maint} todayValue={kpisToday.maint} icon={Sparkles} 
-                       accent="bg-amber-600" sparkColor="#d97706" sparklineData={sparklineArray} dataKey="maint" 
-                    />
+                    <MetricCard title="Total Volume" value={kpis.total} todayValue={kpisToday.total} icon={LayoutDashboard} accent="bg-indigo-600" sparkColor="#4f46e5" sparklineData={sparklineArray} dataKey="total" />
+                    <MetricCard title="Bedroll" value={kpis.bedroll} todayValue={kpisToday.bedroll} icon={Sparkles} accent="bg-purple-600" sparkColor="#9333ea" sparklineData={sparklineArray} dataKey="bedroll" />
+                    <MetricCard title="Cleanliness" value={kpis.clean} todayValue={kpisToday.clean} icon={Sparkles} accent="bg-emerald-600" sparkColor="#10b981" sparklineData={sparklineArray} dataKey="clean" />
+                    <MetricCard title="Watering" value={kpis.water} todayValue={kpisToday.water} icon={Sparkles} accent="bg-sky-600" sparkColor="#0284c7" sparklineData={sparklineArray} dataKey="water" />
+                    <MetricCard title="Maintenance" value={kpis.maint} todayValue={kpisToday.maint} icon={Sparkles} accent="bg-amber-600" sparkColor="#d97706" sparklineData={sparklineArray} dataKey="maint" />
                   </div>
 
-                  {/* VISUAL 1: FOREIGN TRAIN CORRELATION HEATMAP */}
+                  {/* VISUAL 1 */}
                   <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
                     <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex items-center justify-between">
                       <h3 className="text-base font-bold text-slate-800 dark:text-white">Foreign Train Correlation (Coach Owning Zone vs Current Div)</h3>
                       <LucideMap className="text-slate-300 dark:text-slate-600 w-5 h-5"/>
                     </div>
-                    <div className="overflow-x-auto max-h-[400px]">
+                    <div className="overflow-x-auto max-h-[400px] custom-scrollbar">
                       <table className="min-w-full text-left border-collapse text-sm">
                         <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 z-10 shadow-sm">
                           <tr className="text-slate-500 dark:text-slate-400 text-[10px] uppercase tracking-widest">
@@ -1280,13 +1221,13 @@ export default function App() {
                         <tbody className="text-slate-700 dark:text-slate-300 divide-y divide-slate-100 dark:divide-slate-800">
                           {zoneDivMatrix.map((row, idx) => (
                             <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
-                              <td className="p-4 font-bold whitespace-nowrap">{row.zone}</td>
+                              <td className="p-4 font-bold whitespace-nowrap">{row.zone || '—'}</td>
                               {uniqueDivsArray.map((div) => {
                                 const val = row[div] || 0;
                                 const { bg, text } = getHeatmapColor(val, maxZoneDivValue, 'blue');
                                 return (
                                   <td key={String(div)} style={{ backgroundColor: bg, color: text }} className="p-4 font-medium transition-colors">
-                                    {val || '-'}
+                                    {val || '—'}
                                   </td>
                                 );
                               })}
@@ -1298,18 +1239,18 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* VISUAL 2: MAJOR COMPLAINT GIVING TRAINS MATRIX */}
+                  {/* VISUAL 2 */}
                   <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
                     <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60">
                       <h3 className="text-base font-bold text-slate-800 dark:text-white">Major Complaint Giving Trains</h3>
                     </div>
-                    <div className="overflow-x-auto max-h-[600px]">
+                    <div className="overflow-x-auto max-h-[600px] custom-scrollbar">
                       <table className="min-w-full text-left border-collapse text-sm">
                         <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 z-10 shadow-sm">
                           <tr className="text-slate-500 dark:text-slate-400 text-[10px] uppercase tracking-widest">
                             <th className="p-4 font-bold border-b border-slate-200 dark:border-slate-700">Train</th>
                             {uniqueCatsArray.map((c) => (
-                              <th key={String(c)} className="p-4 font-bold border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">{c}</th>
+                              <th key={String(c)} className="p-4 font-bold border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">{formatCategory(c)}</th>
                             ))}
                             <th className="p-4 font-black border-b border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white">Total</th>
                           </tr>
@@ -1318,14 +1259,14 @@ export default function App() {
                           {trainMatrix.slice(0, 50).map((row, idx) => (
                             <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
                               <td className="p-4 font-bold flex items-center text-slate-900 dark:text-white whitespace-nowrap">
-                                <TrainFront className="w-4 h-4 mr-2 text-indigo-400" />{row.train}
+                                <TrainFront className="w-4 h-4 mr-2 text-indigo-400" />{row.train || '—'}
                               </td>
                               {uniqueCatsArray.map((c) => {
                                 const val = row[c] || 0;
                                 const { bg, text } = getHeatmapColor(val, maxTrainCatValue, 'red');
                                 return (
                                   <td key={String(c)} style={{ backgroundColor: bg, color: text }} className="p-4 font-medium transition-colors">
-                                    {val || '-'}
+                                    {val || '—'}
                                   </td>
                                 );
                               })}
@@ -1340,19 +1281,19 @@ export default function App() {
                 </div>
               )}
 
-              {/* TAB: OPERATIONS */}
+              {/* TAB 2: OPERATIONS */}
               {activeTab === 'operations' && (
                 <div className="space-y-8 animate-fade-in">
                   <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
                     <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60">
                       <h3 className="text-base font-bold text-slate-800 dark:text-white">2-Hourly Shift Heatmap</h3>
                     </div>
-                    <div className="overflow-x-auto">
+                    <div className="overflow-x-auto custom-scrollbar">
                       <table className="min-w-full text-left border-collapse">
                         <thead>
                           <tr className="bg-white dark:bg-slate-900 text-slate-400 dark:text-slate-500 text-[10px] uppercase tracking-widest border-b border-slate-100 dark:border-slate-800">
                             <th className="p-4 font-bold">Time Bucket</th>
-                            {uniqueCatsArray.slice(0, 6).map((c) => <th key={String(c)} className="p-4 font-bold">{c}</th>)}
+                            {uniqueCatsArray.slice(0, 6).map((c) => <th key={String(c)} className="p-4 font-bold">{formatCategory(c)}</th>)}
                             <th className="p-4 font-bold text-slate-800 dark:text-white">Total</th>
                           </tr>
                         </thead>
@@ -1360,14 +1301,14 @@ export default function App() {
                           {shiftHeatmap.map((row, idx) => (
                             <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/60">
                               <td className="p-4 font-bold text-slate-800 dark:text-white flex items-center">
-                                <Clock className="w-4 h-4 mr-2 text-slate-400" />{row.shift}
+                                <Clock className="w-4 h-4 mr-2 text-slate-400" />{row.shift || '—'}
                               </td>
                               {uniqueCatsArray.slice(0, 6).map((c) => {
                                 const val = row[c] || 0;
                                 const { bg, text } = getHeatmapColor(val, maxShiftVal, 'red');
                                 return (
                                   <td key={String(c)} style={{ backgroundColor: bg, color: text }} className="p-4 font-medium transition-colors">
-                                    {val || '-'}
+                                    {val || '—'}
                                   </td>
                                 );
                               })}
@@ -1385,10 +1326,10 @@ export default function App() {
                         <ResponsiveContainer width="100%" height="100%">
                           <ScatterChart margin={{ top: 20, right: 20, bottom: 40, left: 20 }}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={gridStroke} />
-                            <XAxis type="category" dataKey="category" allowDuplicatedCategory={false} tick={{ ...axisStyle, angle: -45, textAnchor: 'end' }} tickLine={false} axisLine={false} height={60} />
-                            <YAxis type="number" dataKey="time" tick={axisStyle} tickLine={false} axisLine={false} />
+                            <XAxis type="category" dataKey="category" allowDuplicatedCategory={false} tickFormatter={formatCategory} tick={{ ...axisStyle }} tickLine={false} axisLine={false} height={60} />
+                            <YAxis type="number" dataKey="time" tick={axisStyle} tickFormatter={(v) => `${v}m`} tickLine={false} axisLine={false} />
                             <ZAxis type="category" dataKey="name" />
-                            <Tooltip cursor={{ strokeDasharray: '3 3' }} />
+                            <Tooltip content={<ScatterTooltip />} cursor={{ strokeDasharray: '3 3' }} />
                             <ReferenceLine y={30} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: '30m Target', fill: '#ef4444', fontSize: 12, fontWeight: 'bold' }} />
                             <Scatter name="Complaints" data={scatterData}>
                               {scatterData.map((entry, index) => (
@@ -1400,16 +1341,16 @@ export default function App() {
                       </div>
                     </Card>
 
-                    <Card title="Avg Resolution Speed by Category (Mins)">
+                    <Card title="Avg Resolution Speed by Category">
                       <div className="h-[400px]">
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart data={resSpeedBar} layout="vertical" margin={{ left: 80, right: 60 }}>
                             <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={gridStroke} />
                             <XAxis type="number" axisLine={false} tickLine={false} tick={axisStyle} />
-                            <YAxis dataKey="category" type="category" axisLine={false} tickLine={false} tick={axisStyle} dx={-10} />
-                            <Tooltip cursor={{ fill: theme === 'dark' ? '#1e293b' : '#f8fafc' }} />
+                            <YAxis dataKey="category" type="category" tickFormatter={formatCategory} axisLine={false} tickLine={false} tick={axisStyle} dx={-10} />
+                            <Tooltip cursor={{ fill: theme === 'dark' ? '#1e293b' : '#f8fafc' }} formatter={(val) => formatTime(val)} labelFormatter={formatCategory} />
                             <Bar dataKey="avgMins" name="Avg Mins" fill="#0ea5e9" radius={[0, 4, 4, 0]} barSize={20}>
-                              <LabelList dataKey="avgMins" position="right" style={{ fontSize: '11px', fill: theme === 'dark' ? '#94a3b8' : '#64748b' }} formatter={(val) => `${val} mins`} />
+                              <LabelList dataKey="avgMins" position="right" style={{ fontSize: '11px', fill: theme === 'dark' ? '#94a3b8' : '#64748b' }} formatter={(val) => formatTime(val)} />
                             </Bar>
                           </BarChart>
                         </ResponsiveContainer>
@@ -1419,22 +1360,22 @@ export default function App() {
                 </div>
               )}
 
-              {/* TAB: TRENDS */}
+              {/* TAB 3: TRENDS */}
               {activeTab === 'trends' && (
                 <div className="space-y-8 animate-fade-in">
                   <div className="flex items-center justify-between">
                     <h3 className="text-base font-bold text-slate-700 dark:text-slate-200">Trends Filter</h3>
-                    <div className="inline-flex bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
+                    <div className="inline-flex bg-slate-100 dark:bg-slate-800 p-1 rounded-full border border-slate-200 dark:border-slate-700">
                       {['day', 'week', 'month'].map((g) => {
                         const label = g === 'day' ? 'Daily' : g.charAt(0).toUpperCase() + g.slice(1) + 'ly';
                         return (
                           <button
                             key={g}
                             onClick={() => setTrendsGranularity(g)}
-                            className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${
+                            className={`px-4 py-1.5 text-xs font-bold rounded-full transition-all ${
                               trendsGranularity === g
-                                ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-white shadow'
-                                : 'text-slate-500 dark:text-slate-400'
+                                ? 'bg-indigo-600 text-white shadow-md'
+                                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
                             }`}
                           >
                             {label}
@@ -1455,9 +1396,9 @@ export default function App() {
                             </linearGradient>
                           </defs>
                           <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
-                          <XAxis dataKey="key" tick={axisStyle} tickLine={false} axisLine={false} />
+                          <XAxis dataKey="key" tickFormatter={(val) => trendsGranularity === 'day' ? formatChartDate(val) : val} tick={axisStyle} tickLine={false} axisLine={false} />
                           <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
-                          <Tooltip />
+                          <Tooltip labelFormatter={(val) => trendsGranularity === 'day' ? formatHumanDate(val) : val} />
                           <Legend wrapperStyle={{ fontSize: '12px' }} />
                           <Area type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={2} fill="url(#trendGrad)" name="Complaints">
                             <LabelList dataKey="peakLabel" position="top" offset={10} fill={theme === 'dark' ? '#a5b4fc' : '#4f46e5'} fontSize={12} fontWeight="bold" />
@@ -1473,12 +1414,12 @@ export default function App() {
                       <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={categoryTrendChartData} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
-                          <XAxis dataKey="date" tick={axisStyle} tickLine={false} axisLine={false} />
+                          <XAxis dataKey="date" tickFormatter={(val) => trendsGranularity === 'day' ? formatChartDate(val) : val} tick={axisStyle} tickLine={false} axisLine={false} />
                           <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
-                          <Tooltip />
-                          <Legend wrapperStyle={{ fontSize: '12px' }} />
+                          <Tooltip labelFormatter={(val) => trendsGranularity === 'day' ? formatHumanDate(val) : val} />
+                          <Legend wrapperStyle={{ fontSize: '12px' }} formatter={(val) => formatCategory(val)} />
                           {topCats.map((cat, i) => (
-                            <Area key={String(cat)} type="monotone" dataKey={String(cat)} stackId="1" stroke={COLORS[i % COLORS.length]} fill={COLORS[i % COLORS.length]} strokeWidth={1} dot={false} />
+                            <Area key={String(cat)} type="monotone" name={formatCategory(cat)} dataKey={String(cat)} stackId="1" stroke={COLORS[i % COLORS.length]} fill={COLORS[i % COLORS.length]} strokeWidth={1} dot={false} />
                           ))}
                         </AreaChart>
                       </ResponsiveContainer>
@@ -1490,10 +1431,10 @@ export default function App() {
                       <ResponsiveContainer width="100%" height="100%">
                         <ComposedChart data={currentSlaTrend} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
-                          <XAxis dataKey="date" tick={axisStyle} tickLine={false} axisLine={false} />
+                          <XAxis dataKey="date" tickFormatter={(val) => trendsGranularity === 'day' ? formatChartDate(val) : val} tick={axisStyle} tickLine={false} axisLine={false} />
                           <YAxis yAxisId="left" tick={axisStyle} tickLine={false} axisLine={false} />
                           <YAxis yAxisId="right" orientation="right" tick={axisStyle} tickLine={false} axisLine={false} tickFormatter={(tick) => `${tick}%`} domain={[0, 100]} />
-                          <Tooltip />
+                          <Tooltip labelFormatter={(val) => trendsGranularity === 'day' ? formatHumanDate(val) : val} />
                           <Legend wrapperStyle={{ fontSize: '12px' }} />
                           <Bar yAxisId="left" dataKey="OnTime" stackId="a" fill="#10b981" name="On Time" />
                           <Bar yAxisId="left" dataKey="Breached" stackId="a" fill="#ef4444" name="Breached" />
@@ -1505,7 +1446,7 @@ export default function App() {
                 </div>
               )}
 
-              {/* TAB: ASSETS */}
+              {/* TAB 4: ASSETS */}
               {activeTab === 'assets' && (
                 <div className="space-y-8 animate-fade-in">
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -1536,9 +1477,9 @@ export default function App() {
                             <XAxis type="number" axisLine={false} tickLine={false} tick={axisStyle} />
                             <YAxis dataKey="coachType" type="category" axisLine={false} tickLine={false} tick={axisStyle} dx={-10} />
                             <Tooltip cursor={{ fill: theme === 'dark' ? '#1e293b' : '#f8fafc' }} />
-                            <Legend verticalAlign="bottom" height={36} wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+                            <Legend verticalAlign="bottom" height={36} wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} formatter={formatCategory} />
                             {topCats.map((cat, i) => (
-                              <Bar key={String(cat)} dataKey={String(cat)} name={String(cat)} stackId="a" fill={COLORS[i % COLORS.length]} barSize={20} />
+                              <Bar key={String(cat)} dataKey={String(cat)} name={formatCategory(cat)} stackId="a" fill={COLORS[i % COLORS.length]} barSize={20} />
                             ))}
                           </BarChart>
                         </ResponsiveContainer>
@@ -1554,14 +1495,14 @@ export default function App() {
                     {pestDefectTable.length === 0 ? (
                       <div className="p-8 text-center text-slate-500 dark:text-slate-400 font-medium">No target coaches identified.</div>
                     ) : (
-                      <div className="overflow-x-auto max-h-96">
+                      <div className="overflow-x-auto max-h-96 custom-scrollbar">
                         <table className="min-w-full text-left border-collapse">
                           <thead className="sticky top-0 bg-white dark:bg-slate-900 shadow-sm z-10">
                             <tr className="text-slate-400 dark:text-slate-500 text-[10px] uppercase tracking-widest border-b border-slate-100 dark:border-slate-800">
-                              <th className="p-4 font-bold">Ref No</th>
+                              <th className="p-4 font-bold">Ref No.</th>
                               <th className="p-4 font-bold">Date</th>
-                              <th className="p-4 font-bold">Coach</th>
-                              <th className="p-4 font-bold">Train</th>
+                              <th className="p-4 font-bold">Coach Type & No.</th>
+                              <th className="p-4 font-bold">Train Details</th>
                               <th className="p-4 font-bold">Sub-Category & Desc.</th>
                             </tr>
                           </thead>
@@ -1569,14 +1510,17 @@ export default function App() {
                             {pestDefectTable.map((row, idx) => (
                               <tr key={idx} className={`hover:bg-rose-50/50 dark:hover:bg-rose-950/20 ${row.isPest ? 'bg-rose-50/30 dark:bg-rose-900/10' : ''}`}>
                                 <td className="p-4 font-mono text-[10px] text-slate-400">{row.id}</td>
-                                <td className="p-4 font-bold text-slate-700 dark:text-slate-300 whitespace-nowrap">{row.date}</td>
-                                <td className="p-4 font-bold whitespace-nowrap text-indigo-700 dark:text-indigo-300">{row.coachType} - {row.coachNo}</td>
-                                <td className="p-4 font-bold text-slate-700 dark:text-slate-200">{row.train}</td>
-                                <td className="p-4 text-slate-600 dark:text-slate-400 max-w-md">
-                                  <span className={`font-semibold ${row.isPest ? 'inline-block bg-rose-600 text-white px-2 py-0.5 rounded shadow-sm mb-1' : 'text-rose-800 dark:text-rose-300'}`}>
-                                    {row.subType || 'Unclassified'} {row.isPest && ' (PEST FLAG)'}
+                                <td className="p-4 font-bold text-slate-700 dark:text-slate-300 whitespace-nowrap">{formatHumanDate(row.date)}</td>
+                                <td className="p-4 font-bold whitespace-nowrap text-indigo-700 dark:text-indigo-300">{row.coachType} - {row.coachNo || '—'}</td>
+                                <td className="p-4 font-bold text-slate-700 dark:text-slate-200">{row.train || '—'}</td>
+                                <td className="p-4 max-w-md py-4">
+                                  <span className={`font-bold ${row.isPest ? 'text-rose-700 dark:text-rose-300' : 'text-slate-800 dark:text-slate-200'}`}>
+                                    {formatCategory(row.subType)}
+                                    {row.isPest && <span className="ml-2 inline-block bg-rose-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm">PEST FLAG</span>}
                                   </span>
-                                  <br /><span className={`text-xs ${row.isPest ? 'text-rose-600 dark:text-rose-400 font-bold' : ''}`}>{row.desc}</span>
+                                  <div className={`text-xs mt-1 ${row.isPest ? 'text-rose-600 dark:text-rose-400 font-medium' : 'text-slate-500'}`}>
+                                    {row.desc || '—'}
+                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -1588,13 +1532,13 @@ export default function App() {
                 </div>
               )}
 
-              {/* TAB: SENTIMENT */}
+              {/* TAB 5: SENTIMENT */}
               {activeTab === 'sentiment' && (
                 <div className="space-y-8 animate-fade-in">
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm h-[400px] overflow-hidden flex flex-col">
                       <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-4">Sentiment Word Cloud</h3>
-                      <div className="flex-1 flex flex-wrap content-start items-center justify-center gap-3 overflow-y-auto">
+                      <div className="flex-1 flex flex-wrap content-start items-center justify-center gap-3 overflow-y-auto custom-scrollbar pr-2">
                         {wordCloud.map((w, i) => (
                           <span
                             key={i}
@@ -1633,14 +1577,14 @@ export default function App() {
                     {unsatTable.length === 0 ? (
                       <div className="p-8 text-center text-slate-500 dark:text-slate-400 font-medium">No results found.</div>
                     ) : (
-                      <div className="overflow-x-auto max-h-[500px]">
+                      <div className="overflow-x-auto max-h-[500px] custom-scrollbar">
                         <table className="min-w-full text-left border-collapse">
                           <thead className="sticky top-0 bg-white dark:bg-slate-900 shadow-sm z-10">
                             <tr className="text-slate-400 dark:text-slate-500 text-[10px] uppercase tracking-widest border-b border-slate-100 dark:border-slate-800">
                               <th className="p-4 font-bold">Ref No.</th>
                               <th className="p-4 font-bold">Train</th>
                               <th className="p-4 font-bold">Disposal Time</th>
-                              <th className="p-4 font-bold">Passenger Desc & Feedback</th>
+                              <th className="p-4 font-bold">Passenger Desc. & Feedback</th>
                               <th className="p-4 font-bold">Closing Remarks</th>
                             </tr>
                           </thead>
@@ -1648,15 +1592,12 @@ export default function App() {
                             {unsatTable.map((row, idx) => (
                               <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                                 <td className="p-4 font-mono text-[10px] text-slate-400 whitespace-nowrap">{row.id}</td>
-                                <td className="p-4 font-bold text-slate-800 dark:text-white whitespace-nowrap">{row.train}</td>
-                                <td className="p-4 font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">{row.resTimeMins} mins</td>
-                                <td className="p-4 text-xs max-w-sm">
-                                  <span className="text-slate-600 dark:text-slate-400">{row.desc}</span>
-                                  {row.feedbackRemark && (
-                                    <><br /><span className="text-rose-600 dark:text-rose-300 font-semibold mt-1 inline-block">Passenger: &ldquo;{row.feedbackRemark}&rdquo;</span></>
-                                  )}
+                                <td className="p-4 font-bold text-slate-800 dark:text-white whitespace-nowrap">{row.train || '—'}</td>
+                                <td className="p-4 font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">{formatTime(row.resTimeMins)}</td>
+                                <td className="p-4 text-xs max-w-sm py-4">
+                                  <ExpandableText text={cleanFeedbackText(row.desc, row.feedbackRemark)} />
                                 </td>
-                                <td className="p-4 text-xs text-indigo-700 dark:text-indigo-300 max-w-xs">{row.remarks}</td>
+                                <td className="p-4 text-xs text-indigo-700 dark:text-indigo-300 max-w-xs">{row.remarks || '—'}</td>
                               </tr>
                             ))}
                           </tbody>
