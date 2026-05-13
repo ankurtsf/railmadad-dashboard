@@ -26,8 +26,8 @@ const parseRawDate = (raw) => {
     // Ignore pure floats (PNRs / Reference Numbers)
     if (/^\d+\.\d+$/.test(str)) return null; 
 
-    // Handle Excel serial number conversion if needed
-    if (!isNaN(raw) && typeof raw === 'number' && raw > 40000 && raw < 50000) {
+    // Handle Excel serial number conversion
+    if (!isNaN(raw) && typeof raw === 'number' && raw > 40000 && raw < 60000) {
         const d = new Date(Math.round((raw - 25569) * 86400 * 1000));
         return {
             date: d.toISOString().split('T')[0],
@@ -161,24 +161,22 @@ export default function App() {
     loadDependencies();
   }, []);
 
-  // 2. Fetch Data from Supabase (Persistent State)
+  // 2. Fetch Data from Supabase (Persistence)
   const fetchCloudData = async () => {
     if (!supabaseClient) return;
     try {
       const { data, error } = await supabaseClient.from('railmadad_sync').select('*').eq('id', 1).single();
       if (error) {
-          // If row 1 doesn't exist, create it
           if (error.code === 'PGRST116') {
               await supabaseClient.from('railmadad_sync').insert([{ id: 1, json_data: initialRawDatabase }]);
           }
-          setLastSync("Empty");
+          setLastSync("Empty Storage");
           return;
       }
       if (data && data.json_data && data.json_data.records) {
         setDbData(data.json_data);
         setLastSync(new Date(data.last_updated || Date.now()).toLocaleTimeString());
         
-        // Only adjust filters if state is currently empty
         if (dbData.records.length === 0 && data.json_data.records.length > 0) {
             const sortedDates = [...data.json_data.records].map(r => r.date).sort();
             setFromDate(sortedDates[0]);
@@ -301,7 +299,7 @@ export default function App() {
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file || !window.XLSX || !supabaseClient) {
-        showToast("Systems are still initializing. Please try again in 2 seconds.");
+        showToast("Systems are still initializing. Please wait a second.");
         return;
     }
 
@@ -314,22 +312,24 @@ export default function App() {
         const workbook = window.XLSX.read(buffer, { type: 'array' });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
         
-        // Read as matrix to avoid header-key mismatch issues
+        // Read as matrix
         const rawArray = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
         
-        if (rawArray.length === 0) throw new Error("File is empty.");
+        if (!rawArray || rawArray.length === 0) throw new Error("File is empty.");
 
-        // Dynamic header detection with normalization
+        // Dynamic header detection (scans up to 50 rows)
         let headerRowIdx = -1;
         let colMap = {};
+        const keyHeaders = ['complaintrefno', 'refno', 'createdon', 'comptypename', 'trainstation'];
         
-        for (let i = 0; i < Math.min(30, rawArray.length); i++) {
+        for (let i = 0; i < Math.min(50, rawArray.length); i++) {
             const row = rawArray[i];
             if (!row || !Array.isArray(row)) continue;
             
-            const cleanRow = row.map(c => String(c).toLowerCase().replace(/[^a-z0-9]/g, '').trim());
+            const cleanRow = row.map(c => String(c || "").toLowerCase().replace(/[^a-z0-9]/g, '').trim());
             
-            if (cleanRow.includes('complaintrefno') || cleanRow.includes('createdon')) {
+            const matchCount = keyHeaders.filter(kh => cleanRow.includes(kh)).length;
+            if (matchCount >= 2) {
                 headerRowIdx = i;
                 cleanRow.forEach((val, colIdx) => {
                     if (val) colMap[val] = colIdx;
@@ -339,7 +339,7 @@ export default function App() {
         }
 
         if (headerRowIdx === -1) {
-            showToast("⚠️ Standard Raw Data headers not found. Ensure you are uploading a Raw RailMadad CSV.");
+            showToast("⚠️ Could not find standardized headers. Please check Excel format.");
             setIsUploading(false);
             e.target.value = null; 
             return;
@@ -351,7 +351,8 @@ export default function App() {
         };
 
         const existingMap = new Map();
-        (dbData.records || []).forEach(r => existingMap.set(String(r.id), r));
+        const baseRecords = dbData.records || [];
+        baseRecords.forEach(r => existingMap.set(String(r.id), r));
 
         let newRecordsAdded = 0;
         let duplicatesSkipped = 0;
@@ -360,7 +361,7 @@ export default function App() {
             const row = rawArray[i];
             if (!row || row.length === 0) continue;
 
-            const refNo = getValue(row, 'complaintrefno');
+            const refNo = getValue(row, 'complaintrefno') || getValue(row, 'refno');
             const createdOn = getValue(row, 'createdon');
             if (!refNo || !createdOn) continue; 
 
@@ -418,28 +419,33 @@ export default function App() {
             setFromDate(sortedDates[0]);
             setToDate(sortedDates[sortedDates.length - 1]);
 
-            showToast(`✅ Successfully added ${newRecordsAdded} records.`);
+            showToast(`✅ Added ${newRecordsAdded} records. Cloud syncing...`);
 
-            // Push to Cloud
             const { error } = await supabaseClient.from('railmadad_sync').upsert({ 
                 id: 1,
                 json_data: newData, 
                 last_updated: new Date().toISOString() 
-            }, { onConflict: 'id' });
+            });
 
             if (error) {
                 console.error("Cloud Save failed", error);
-                showToast("⚠️ Cloud Sync failed. Check Supabase connection.");
+                showToast("⚠️ Cloud Sync failed. Data saved locally only.");
+            } else {
+                showToast(`✅ Cloud Storage updated successfully.`);
             }
         } else {
-            showToast("No new records were added (All duplicates).");
+            showToast("No new records were added (Duplicates found).");
         }
       } catch (err) {
         console.error("Critical Parse Error:", err);
-        showToast("❌ Error processing file. Please check Excel format.");
+        showToast("❌ Unexpected error processing file.");
       }
       setIsUploading(false);
       e.target.value = null; 
+    };
+    reader.onerror = () => {
+        showToast("❌ Error reading file buffer.");
+        setIsUploading(false);
     };
     reader.readAsArrayBuffer(file);
   };
@@ -455,10 +461,10 @@ export default function App() {
     setSelectedZone('All'); setSelectedStatus('All');
 
     try {
-      await supabaseClient.from('railmadad_sync').upsert({ id: 1, json_data: initialRawDatabase, last_updated: new Date().toISOString() }, { onConflict: 'id' });
-      showToast("Database wiped clean.");
+      await supabaseClient.from('railmadad_sync').upsert({ id: 1, json_data: initialRawDatabase, last_updated: new Date().toISOString() });
+      showToast("✅ Database wiped clean (Local & Cloud).");
     } catch (err) {
-      showToast("Cloud reset failed.");
+      showToast("⚠️ Cloud reset failed.");
     }
   };
 
@@ -479,7 +485,7 @@ export default function App() {
             </div>
             <h3 className="text-xl font-bold text-slate-800 mb-2">Wipe Database?</h3>
             <p className="text-sm text-slate-500 mb-6 leading-relaxed">
-              This will permanently delete all raw data.
+              This will permanently delete all data from Local and Cloud storage.
             </p>
             <div className="flex space-x-3">
               <button onClick={() => setShowResetModal(false)} className="flex-1 py-2.5 rounded-lg border border-slate-200 text-slate-600 font-semibold text-sm hover:bg-slate-50 transition-colors">Cancel</button>
@@ -489,6 +495,7 @@ export default function App() {
         </div>
       )}
       
+      {/* SIDEBAR */}
       <aside className={`fixed md:sticky top-0 left-0 z-40 w-64 h-screen transition-transform transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 bg-white border-r border-slate-200 shadow-sm flex flex-col`}>
         <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-indigo-700">
           <div>
@@ -503,7 +510,7 @@ export default function App() {
         <div className="p-5 border-b border-slate-100 bg-slate-50">
            <label className="flex items-center justify-center w-full px-4 py-3 bg-indigo-600 text-white rounded-lg shadow-sm hover:bg-indigo-700 cursor-pointer transition-colors active:scale-95">
               {isUploading ? (
-                <span className="animate-pulse flex items-center text-sm font-bold">Processing...</span>
+                <span className="animate-pulse flex items-center text-sm font-bold">Scanning...</span>
               ) : (
                 <>
                   <Upload className="w-4 h-4 mr-2" />
@@ -512,7 +519,7 @@ export default function App() {
                 </>
               )}
            </label>
-           <p className="text-[10px] text-slate-400 mt-3 text-center font-medium italic">Cloud Status: {String(lastSync)}</p>
+           <p className="text-[10px] text-slate-400 mt-3 text-center font-medium italic">Cloud: {String(lastSync)}</p>
         </div>
 
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
@@ -531,7 +538,7 @@ export default function App() {
 
         <div className="p-4 border-t border-slate-100 bg-slate-50">
            <button onClick={() => setShowResetModal(true)} className="flex items-center justify-center w-full py-2 text-[11px] font-bold text-rose-500 hover:bg-rose-50 rounded-lg transition-colors mb-4">
-             <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Wipe Local & Cloud
+             <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Wipe Database
            </button>
            <div className="flex items-center justify-center opacity-70 hover:opacity-100 transition-opacity">
              <Cpu className="w-4 h-4 text-indigo-600 mr-2" />
@@ -582,16 +589,16 @@ export default function App() {
           {(dbData.records || []).length === 0 ? (
              <div className="bg-white p-16 mt-10 rounded-3xl border border-slate-200 flex flex-col items-center justify-center text-center max-w-2xl mx-auto shadow-sm">
                <div className="w-24 h-24 bg-indigo-50 rounded-full flex items-center justify-center mb-6"><FileSpreadsheet className="w-12 h-12 text-indigo-400" /></div>
-               <h3 className="text-3xl font-black text-slate-800 tracking-tight">Database is Empty</h3>
+               <h3 className="text-3xl font-black text-slate-800 tracking-tight">Dashboard Empty</h3>
                <p className="text-slate-500 mt-4 max-w-md leading-relaxed font-medium">
-                 Click the <b>"Append Raw Export"</b> button in the sidebar to securely upload your raw RailMadad CSV file.
+                 Append your RailMadad Raw CSV export to see real-time analytics.
                </p>
              </div>
           ) : !kpis || kpis.total === 0 ? (
              <div className="bg-white p-12 mt-10 rounded-2xl border border-slate-200 flex flex-col items-center justify-center text-center max-w-2xl mx-auto shadow-sm">
                <Calendar className="w-12 h-12 text-slate-300 mb-4" />
-               <h3 className="text-xl font-bold text-slate-800">No Match</h3>
-               <p className="text-slate-500 mt-2 max-w-sm">Try removing Zone/Status filters or expanding dates.</p>
+               <h3 className="text-xl font-bold text-slate-800">No Records Found</h3>
+               <p className="text-slate-500 mt-2 max-w-sm">No data matches your current filters.</p>
              </div>
           ) : (
             <>
@@ -654,7 +661,7 @@ export default function App() {
                       <table className="min-w-full text-left border-collapse">
                         <thead className="sticky top-0 bg-slate-100 z-10 shadow-sm">
                           <tr className="text-slate-500 text-[10px] uppercase tracking-widest">
-                            <th className="p-4 font-bold border-b border-slate-200">Category (compTypeName)</th>
+                            <th className="p-4 font-bold border-b border-slate-200">Category</th>
                             {monthsSorted.map(m => <th key={String(m)} className="p-4 font-bold border-b border-slate-200">{String(m)}</th>)}
                             <th className="p-4 font-black border-b border-slate-200 text-slate-800">Total</th>
                           </tr>
@@ -678,7 +685,7 @@ export default function App() {
                        <h3 className="text-base font-bold text-rose-900">Pest Control & Rodent Target List</h3>
                     </div>
                     {pestTable.length === 0 ? (
-                      <div className="p-8 text-center text-slate-500 font-medium">No Pest Control complaints identified via description keywords.</div>
+                      <div className="p-8 text-center text-slate-500 font-medium">No Pest Control complaints identified in this period.</div>
                     ) : (
                       <div className="overflow-x-auto max-h-96">
                         <table className="min-w-full text-left border-collapse">
@@ -714,7 +721,7 @@ export default function App() {
               {activeTab === 'trains' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Top 15 Trains</h3>
+                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Top 15 Affected Trains</h3>
                     <div className="h-[400px]">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={trainData.slice(0, 15)} layout="vertical" margin={{ left: 60, right: 20 }}>
@@ -729,7 +736,7 @@ export default function App() {
                   </div>
 
                   <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-                    <div className="px-6 py-5 border-b border-slate-100 bg-slate-50"><h3 className="text-base font-bold text-slate-800">Train Number vs. Raw Category Matrix</h3></div>
+                    <div className="px-6 py-5 border-b border-slate-100 bg-slate-50"><h3 className="text-base font-bold text-slate-800">Train vs. Category Matrix</h3></div>
                     <div className="overflow-x-auto max-h-[600px]">
                       <table className="min-w-full text-left border-collapse">
                         <thead className="sticky top-0 bg-slate-100 z-10 shadow-sm">
@@ -758,7 +765,7 @@ export default function App() {
               {activeTab === 'geo' && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm h-fit">
-                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Zone Analysis</h3>
+                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Zone Breakdown</h3>
                     <div className="h-[400px]">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={zoneData} layout="vertical" margin={{ left: 20, right: 20 }}>
@@ -833,7 +840,7 @@ export default function App() {
                     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
                        <div className="px-6 py-5 border-b border-slate-100 bg-rose-50 flex items-center">
                            <MessageSquareWarning className="w-5 h-5 text-rose-600 mr-2" />
-                           <h3 className="text-base font-bold text-rose-900">Unsatisfactory Feedback Cases</h3>
+                           <h3 className="text-base font-bold text-rose-900">Highest Feedback: Unsatisfactory Cases</h3>
                        </div>
                        {unsatTable.length === 0 ? (
                          <div className="p-8 text-center text-slate-500 font-medium">No results found.</div>
