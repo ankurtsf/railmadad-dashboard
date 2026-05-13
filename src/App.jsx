@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
   LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -252,7 +252,7 @@ const ScatterTooltip = ({ active, payload }) => {
     return (
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-3 rounded-lg shadow-lg">
         <p className="font-bold text-slate-800 dark:text-white mb-1">Ref: {data.name}</p>
-        <p className="text-sm font-medium text-slate-600 dark:text-slate-300">{formatCategory(data.category)}</p>
+        <p className="text-sm font-medium text-slate-600 dark:text-slate-300">{formatCategory(data.categoryName || data.category)}</p>
         <p className="text-sm font-black text-indigo-600 dark:text-indigo-400 mt-1">{formatTime(data.time)} to resolve</p>
       </div>
     );
@@ -633,9 +633,22 @@ export default function App() {
     const sparklineArray = Array.from(dailySparkMap.values()).sort((a,b) => a.date.localeCompare(b.date));
     const shiftHeatmap = Array.from(shiftCatMap.values()).sort((a, b) => String(a.shift).localeCompare(String(b.shift)));
     
+    // Simulate categorical jitter by mapping categories to a numeric X-axis index +/- random offset
+    const finalScatterData = scatterData.map(d => {
+      const catIdx = uniqueCatsArray.indexOf(d.category);
+      // Jitter range from -0.25 to +0.25 within the category column
+      const jitter = (Math.random() - 0.5) * 0.5;
+      return {
+        ...d,
+        categoryIndex: catIdx + jitter,
+        categoryName: d.category // Preserved for tooltips
+      };
+    });
+    
+    // Sorted ascending so highest average minute categories appear at the TOP of the Recharts vertical BarChart
     const resSpeedBar = Array.from(catResMap.values())
       .map((c) => ({ category: String(c.category), avgMins: Math.round(c.sum / c.count) }))
-      .sort((a, b) => b.avgMins - a.avgMins); 
+      .sort((a, b) => a.avgMins - b.avgMins); 
       
     const wateringList = Array.from(wateringMap.entries())
       .map(([station, count]) => ({ station: String(station), count }))
@@ -691,7 +704,7 @@ export default function App() {
 
     return {
       kpis, kpisToday, sparklineArray, maxZoneDivValue, maxTrainCatValue, maxShiftVal, options: opt,
-      trainMatrix, zoneDivMatrix, uniqueDivsArray, shiftHeatmap, scatterData, resSpeedBar,
+      trainMatrix, zoneDivMatrix, uniqueDivsArray, shiftHeatmap, scatterData: finalScatterData, resSpeedBar,
       wateringList, pestDefectTable, coachMatrix, unsatTable, quickCloseData, wordCloud,
       uniqueCatsArray, validRecords,
       dailyTrend, weeklyTrend, monthlyTrend, categoryTrend, topCats, slaTrend
@@ -969,6 +982,7 @@ export default function App() {
   const axisStyle = { fontSize: 11, fill: theme === 'dark' ? '#94a3b8' : '#64748b' };
   const gridStroke = theme === 'dark' ? '#1e293b' : '#f1f5f9';
   const maxWateringVal = wateringList.length > 0 ? Math.max(...wateringList.map(w => w.count)) : 1;
+  const maxAvgMins = resSpeedBar.length > 0 ? Math.max(...resSpeedBar.map(d => d.avgMins)) : 1;
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col md:flex-row font-sans text-slate-900 dark:text-slate-100 relative transition-colors">
@@ -1262,20 +1276,51 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* VISUAL 2: TOP FOREIGN ZONES */}
-                  <Card title="Top 5 Foreign Zones Driving Complaints">
-                    <div className="h-[320px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={zoneDivMatrix.slice(0, 5)} layout="vertical" margin={{ left: 20, right: 40, top: 10, bottom: 10 }}>
-                          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={gridStroke} />
-                          <XAxis type="number" axisLine={false} tickLine={false} tick={axisStyle} />
-                          <YAxis dataKey="zone" type="category" axisLine={false} tickLine={false} tick={axisStyle} dx={-10} />
-                          <Tooltip cursor={{ fill: theme === 'dark' ? '#1e293b' : '#f8fafc' }} />
-                          <Bar dataKey="Total" name="Complaints" fill="#8b5cf6" radius={[0, 4, 4, 0]} barSize={30}>
-                            <LabelList dataKey="Total" position="right" style={{ fontSize: '12px', fill: theme === 'dark' ? '#cbd5e1' : '#475569', fontWeight: 'bold' }} />
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
+                  {/* VISUAL 2: MODERN SAAS HEATMAP (FOREIGN ZONES VS DIVISION) */}
+                  <Card title="Foreign Zone Impact Matrix (Owning Zone vs. Current Division)">
+                    <div className="overflow-x-auto custom-scrollbar pb-2">
+                      <table className="min-w-full text-left border-separate border-spacing-1.5 text-sm">
+                        <thead>
+                          <tr className="text-slate-500 dark:text-slate-400 text-[10px] uppercase tracking-widest">
+                            <th className="p-2 font-bold whitespace-nowrap">Owning Zone</th>
+                            {uniqueDivsArray.map((div) => (
+                              <th key={String(div)} className="p-2 font-bold text-center whitespace-nowrap">{div}</th>
+                            ))}
+                            <th className="p-2 font-black text-center text-slate-800 dark:text-white">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {zoneDivMatrix.slice(0, 10).map((row, idx) => (
+                            <tr key={idx} className="group">
+                              <td className="p-2 font-bold text-slate-700 dark:text-slate-300 whitespace-nowrap flex items-center">
+                                <LucideMap className="w-4 h-4 mr-2 text-indigo-400" />
+                                {row.zone || '—'}
+                              </td>
+                              {uniqueDivsArray.map((div) => {
+                                const val = row[div] || 0;
+                                const colorConfig = getHeatmapColor(val, maxZoneDivValue, 'red');
+
+                                return (
+                                  <td key={String(div)} className="p-0">
+                                    <div 
+                                      className={`h-9 flex items-center justify-center rounded-lg font-medium text-xs transition-transform duration-200 group-hover:scale-[1.02] cursor-default ${val > 0 ? 'shadow-sm ring-1 ring-black/5 dark:ring-white/5' : 'bg-slate-50 dark:bg-slate-800/50 text-slate-400 dark:text-slate-600'}`}
+                                      style={val > 0 ? { backgroundColor: colorConfig.bg, color: colorConfig.text } : {}}
+                                      title={`${row.zone} in ${div}: ${val} complaints`}
+                                    >
+                                      {val || '—'}
+                                    </div>
+                                  </td>
+                                );
+                              })}
+                              <td className="p-2 text-center">
+                                <span className="inline-flex items-center justify-center min-w-[2rem] h-8 px-2 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 font-black text-indigo-600 dark:text-indigo-400 text-xs shadow-sm">
+                                  {row.Total}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </Card>
 
@@ -1327,7 +1372,21 @@ export default function App() {
                         <ResponsiveContainer width="100%" height="100%">
                           <ScatterChart margin={{ top: 20, right: 20, bottom: 40, left: 20 }}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={gridStroke} />
-                            <XAxis type="category" dataKey="category" allowDuplicatedCategory={false} tickFormatter={formatCategory} tick={{ ...axisStyle }} tickLine={false} axisLine={false} height={60} />
+                            <XAxis 
+                              type="number" 
+                              dataKey="categoryIndex" 
+                              allowDuplicatedCategory={false} 
+                              domain={[-0.5, uniqueCatsArray.length - 0.5]}
+                              ticks={uniqueCatsArray.map((_, i) => i)}
+                              tickFormatter={(val) => {
+                                const cat = uniqueCatsArray[Math.round(val)];
+                                return cat ? formatCategory(cat) : '';
+                              }}
+                              tick={{ ...axisStyle, angle: -45, textAnchor: 'end' }} 
+                              tickLine={false} 
+                              axisLine={false} 
+                              height={60} 
+                            />
                             <YAxis type="number" dataKey="time" tick={axisStyle} tickFormatter={(v) => `${v}m`} tickLine={false} axisLine={false} />
                             <ZAxis type="category" dataKey="name" />
                             <Tooltip content={<ScatterTooltip />} cursor={{ strokeDasharray: '3 3' }} />
@@ -1350,7 +1409,11 @@ export default function App() {
                             <XAxis type="number" axisLine={false} tickLine={false} tick={axisStyle} />
                             <YAxis dataKey="category" type="category" tickFormatter={formatCategory} axisLine={false} tickLine={false} tick={axisStyle} dx={-10} />
                             <Tooltip cursor={{ fill: theme === 'dark' ? '#1e293b' : '#f8fafc' }} formatter={(val) => formatTime(val)} labelFormatter={formatCategory} />
-                            <Bar dataKey="avgMins" name="Avg Mins" fill="#0ea5e9" radius={[0, 4, 4, 0]} barSize={20}>
+                            <Bar dataKey="avgMins" name="Avg Mins" radius={[0, 4, 4, 0]} barSize={20}>
+                              {resSpeedBar.map((entry, index) => {
+                                const { bg } = getHeatmapColor(entry.avgMins, maxAvgMins, 'red');
+                                return <Cell key={`cell-${index}`} fill={bg} />;
+                              })}
                               <LabelList dataKey="avgMins" position="right" style={{ fontSize: '11px', fill: theme === 'dark' ? '#94a3b8' : '#64748b' }} formatter={(val) => formatTime(val)} />
                             </Bar>
                           </BarChart>
