@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -9,7 +9,7 @@ import {
   Sparkles, Menu, X, AlertTriangle, Upload, Calendar, Trash2,
   FileSpreadsheet, Bug, Map as LucideMap, Filter, ChevronDown, Loader2,
   Target, Moon, Sun, Download, TrendingUp, LogOut, Lock, Mail,
-  Eye, EyeOff, FileText, FileBarChart
+  Eye, EyeOff, FileText, FileBarChart, BedDouble, Droplets, Wrench, Activity
 } from 'lucide-react';
 
 // ──────────────────────────────────────────────────────────────────
@@ -138,7 +138,7 @@ const navItemsList = [
   { id: 'sentiment', label: 'Passenger Sentiment', icon: MessageSquareWarning },
 ];
 
-const MetricCard = ({ title, value, todayValue, icon: Icon, accent, sparkColor, sparklineData, dataKey }) => (
+const MetricCard = ({ title, value, todayValue, icon: Icon, accent, sparkColor, sparklineData, dataKey, onTodayClick }) => (
   <div className="relative bg-white dark:bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col justify-between overflow-hidden transition-colors h-32">
     <div className="relative z-10 flex justify-between items-start mb-1">
       <div>
@@ -150,9 +150,13 @@ const MetricCard = ({ title, value, todayValue, icon: Icon, accent, sparkColor, 
       </div>
     </div>
     <div className="relative z-10 flex items-center">
-        <span className="text-xs font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700">
+        <button 
+           onClick={onTodayClick} 
+           title="Click to filter by Today"
+           className="text-xs font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/40 hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors cursor-pointer"
+        >
            Today: {todayValue}
-        </span>
+        </button>
     </div>
     {sparklineData && sparklineData.length > 0 && (
       <div className="absolute bottom-0 left-0 right-0 h-16 opacity-30 pointer-events-none">
@@ -390,6 +394,11 @@ export default function App() {
   };
 
   const updateFilter = (key, value) => setFilters((prev) => ({ ...prev, [key]: value }));
+  
+  const handleTodayClick = () => {
+    setFilters(prev => ({ ...prev, fromDate: todayStr, toDate: todayStr }));
+    showToast("Filtered to Today's Volume");
+  };
 
   const applyDashboardData = (dataObj, syncMessage) => {
     setDbData(dataObj);
@@ -533,7 +542,8 @@ export default function App() {
       sparkObj.total++;
       if (isToday) kpisToday.total++;
 
-      if (catLow.includes('bedroll') || catLow.includes('linen')) { kpis.bedroll++; sparkObj.bedroll++; if(isToday) kpisToday.bedroll++; }
+      // BUG FIX: Added 'bed roll' to match un-concatenated strings
+      if (catLow.includes('bedroll') || catLow.includes('bed roll') || catLow.includes('linen')) { kpis.bedroll++; sparkObj.bedroll++; if(isToday) kpisToday.bedroll++; }
       if (catLow.includes('clean') || catLow.includes('dirt')) { kpis.clean++; sparkObj.clean++; if(isToday) kpisToday.clean++; }
       if (catLow.includes('water') || catLow.includes('plumb')) { kpis.water++; sparkObj.water++; if(isToday) kpisToday.water++; }
       if (catLow.includes('maintain') || catLow.includes('coach') || catLow.includes('equip')) { kpis.maint++; sparkObj.maint++; if(isToday) kpisToday.maint++; }
@@ -1133,13 +1143,25 @@ export default function App() {
 
           {showFilters && (
             <div className="px-4 md:px-8 py-4 bg-slate-50 dark:bg-slate-900/60 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 border-b border-slate-200 dark:border-slate-800 relative z-30">
-              <div className="flex flex-col">
+              <div className="flex flex-col relative">
                 <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">From Date</span>
-                <input type="date" value={filters.fromDate} onChange={(e) => updateFilter('fromDate', e.target.value)} className="text-sm border border-slate-200 dark:border-slate-700 rounded p-1.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 outline-none focus:ring-1 focus:ring-indigo-500" />
+                <div className="relative">
+                  <div className="text-sm border border-slate-200 dark:border-slate-700 rounded p-1.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 flex items-center justify-between pointer-events-none">
+                     <span>{formatHumanDate(filters.fromDate)}</span>
+                     <Calendar className="w-4 h-4 text-slate-400" />
+                  </div>
+                  <input type="date" value={filters.fromDate} onChange={(e) => updateFilter('fromDate', e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                </div>
               </div>
-              <div className="flex flex-col">
+              <div className="flex flex-col relative">
                 <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">To Date</span>
-                <input type="date" value={filters.toDate} onChange={(e) => updateFilter('toDate', e.target.value)} className="text-sm border border-slate-200 dark:border-slate-700 rounded p-1.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 outline-none focus:ring-1 focus:ring-indigo-500" />
+                <div className="relative">
+                  <div className="text-sm border border-slate-200 dark:border-slate-700 rounded p-1.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 flex items-center justify-between pointer-events-none">
+                     <span>{formatHumanDate(filters.toDate)}</span>
+                     <Calendar className="w-4 h-4 text-slate-400" />
+                  </div>
+                  <input type="date" value={filters.toDate} onChange={(e) => updateFilter('toDate', e.target.value)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                </div>
               </div>
               
               {[
@@ -1192,59 +1214,21 @@ export default function App() {
               {activeTab === 'executive' && (
                 <div className="space-y-8 animate-fade-in">
                   
-                  {/* KPI TILES */}
+                  {/* KPI TILES (WITH DUAL METRICS & SPARKLINES) */}
                   <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-6">
-                    <MetricCard title="Total Volume" value={kpis.total} todayValue={kpisToday.total} icon={LayoutDashboard} accent="bg-indigo-600" sparkColor="#4f46e5" sparklineData={sparklineArray} dataKey="total" />
-                    <MetricCard title="Bedroll" value={kpis.bedroll} todayValue={kpisToday.bedroll} icon={Sparkles} accent="bg-purple-600" sparkColor="#9333ea" sparklineData={sparklineArray} dataKey="bedroll" />
-                    <MetricCard title="Cleanliness" value={kpis.clean} todayValue={kpisToday.clean} icon={Sparkles} accent="bg-emerald-600" sparkColor="#10b981" sparklineData={sparklineArray} dataKey="clean" />
-                    <MetricCard title="Watering" value={kpis.water} todayValue={kpisToday.water} icon={Sparkles} accent="bg-sky-600" sparkColor="#0284c7" sparklineData={sparklineArray} dataKey="water" />
-                    <MetricCard title="Maintenance" value={kpis.maint} todayValue={kpisToday.maint} icon={Sparkles} accent="bg-amber-600" sparkColor="#d97706" sparklineData={sparklineArray} dataKey="maint" />
+                    <MetricCard title="Total Volume" value={kpis.total} todayValue={kpisToday.total} icon={Activity} accent="bg-indigo-600" sparkColor="#4f46e5" sparklineData={sparklineArray} dataKey="total" onTodayClick={handleTodayClick} />
+                    <MetricCard title="Bedroll" value={kpis.bedroll} todayValue={kpisToday.bedroll} icon={BedDouble} accent="bg-purple-600" sparkColor="#9333ea" sparklineData={sparklineArray} dataKey="bedroll" onTodayClick={handleTodayClick} />
+                    <MetricCard title="Cleanliness" value={kpis.clean} todayValue={kpisToday.clean} icon={Sparkles} accent="bg-emerald-600" sparkColor="#10b981" sparklineData={sparklineArray} dataKey="clean" onTodayClick={handleTodayClick} />
+                    <MetricCard title="Watering" value={kpis.water} todayValue={kpisToday.water} icon={Droplets} accent="bg-sky-600" sparkColor="#0284c7" sparklineData={sparklineArray} dataKey="water" onTodayClick={handleTodayClick} />
+                    <MetricCard title="Maintenance" value={kpis.maint} todayValue={kpisToday.maint} icon={Wrench} accent="bg-amber-600" sparkColor="#d97706" sparklineData={sparklineArray} dataKey="maint" onTodayClick={handleTodayClick} />
                   </div>
 
-                  {/* VISUAL 1 */}
-                  <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
-                    <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex items-center justify-between">
-                      <h3 className="text-base font-bold text-slate-800 dark:text-white">Foreign Train Correlation (Coach Owning Zone vs Current Div)</h3>
-                      <LucideMap className="text-slate-300 dark:text-slate-600 w-5 h-5"/>
-                    </div>
-                    <div className="overflow-x-auto max-h-[400px] custom-scrollbar">
-                      <table className="min-w-full text-left border-collapse text-sm">
-                        <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 z-10 shadow-sm">
-                          <tr className="text-slate-500 dark:text-slate-400 text-[10px] uppercase tracking-widest">
-                            <th className="p-4 font-bold border-b border-slate-200 dark:border-slate-700">Coach Owning Zone</th>
-                            {uniqueDivsArray.map((div) => (
-                              <th key={String(div)} className="p-4 font-bold border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">{div}</th>
-                            ))}
-                            <th className="p-4 font-black border-b border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white">Total</th>
-                          </tr>
-                        </thead>
-                        <tbody className="text-slate-700 dark:text-slate-300 divide-y divide-slate-100 dark:divide-slate-800">
-                          {zoneDivMatrix.map((row, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
-                              <td className="p-4 font-bold whitespace-nowrap">{row.zone || '—'}</td>
-                              {uniqueDivsArray.map((div) => {
-                                const val = row[div] || 0;
-                                const { bg, text } = getHeatmapColor(val, maxZoneDivValue, 'blue');
-                                return (
-                                  <td key={String(div)} style={{ backgroundColor: bg, color: text }} className="p-4 font-medium transition-colors">
-                                    {val || '—'}
-                                  </td>
-                                );
-                              })}
-                              <td className="p-4 font-black text-indigo-600 dark:text-indigo-400">{row.Total}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  {/* VISUAL 2 */}
+                  {/* VISUAL 1: MAJOR COMPLAINT GIVING TRAINS MATRIX */}
                   <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
                     <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60">
                       <h3 className="text-base font-bold text-slate-800 dark:text-white">Major Complaint Giving Trains</h3>
                     </div>
-                    <div className="overflow-x-auto max-h-[600px] custom-scrollbar">
+                    <div className="overflow-x-auto max-h-[500px] custom-scrollbar">
                       <table className="min-w-full text-left border-collapse text-sm">
                         <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 z-10 shadow-sm">
                           <tr className="text-slate-500 dark:text-slate-400 text-[10px] uppercase tracking-widest">
@@ -1277,6 +1261,23 @@ export default function App() {
                       </table>
                     </div>
                   </div>
+
+                  {/* VISUAL 2: TOP FOREIGN ZONES */}
+                  <Card title="Top 5 Foreign Zones Driving Complaints">
+                    <div className="h-[320px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={zoneDivMatrix.slice(0, 5)} layout="vertical" margin={{ left: 20, right: 40, top: 10, bottom: 10 }}>
+                          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={gridStroke} />
+                          <XAxis type="number" axisLine={false} tickLine={false} tick={axisStyle} />
+                          <YAxis dataKey="zone" type="category" axisLine={false} tickLine={false} tick={axisStyle} dx={-10} />
+                          <Tooltip cursor={{ fill: theme === 'dark' ? '#1e293b' : '#f8fafc' }} />
+                          <Bar dataKey="Total" name="Complaints" fill="#8b5cf6" radius={[0, 4, 4, 0]} barSize={30}>
+                            <LabelList dataKey="Total" position="right" style={{ fontSize: '12px', fill: theme === 'dark' ? '#cbd5e1' : '#475569', fontWeight: 'bold' }} />
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </Card>
 
                 </div>
               )}
