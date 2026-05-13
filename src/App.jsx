@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  ScatterChart, Scatter, ZAxis, ReferenceLine, LabelList
+  ScatterChart, Scatter, ZAxis, ReferenceLine, LabelList, ComposedChart
 } from 'recharts';
 import {
   LayoutDashboard, TrainFront, Clock, MessageSquareWarning,
@@ -612,7 +612,8 @@ export default function App() {
 
       if (!slaTrendMap.has(dKey)) slaTrendMap.set(dKey, { date: dKey, OnTime: 0, Breached: 0 });
       const slaObj = slaTrendMap.get(dKey);
-      if (String(r.sla).toLowerCase().includes('breach') || String(r.sla).toLowerCase().includes('miss')) {
+      // Strictly defined: > 30 mins is Breached, <= 30 mins is OnTime
+      if (r.resTimeMins > 30) {
         slaObj.Breached++;
       } else {
         slaObj.OnTime++;
@@ -647,9 +648,21 @@ export default function App() {
       .map((w) => ({ ...w, fontSize: Math.max(12, Math.min(48, w.value * 1.5)) }));
 
     // Trend arrays
-    const dailyTrend = Array.from(dailyMap.entries())
+    const dailyTrendRaw = Array.from(dailyMap.entries())
       .map(([date, count]) => ({ key: date, count }))
       .sort((a, b) => a.key.localeCompare(b.key));
+      
+    // Calculate 7-Day Moving Average for Daily Trend
+    const dailyTrend = dailyTrendRaw.map((day, i, arr) => {
+      let sum = 0;
+      let count = 0;
+      for (let j = Math.max(0, i - 6); j <= i; j++) {
+        sum += arr[j].count;
+        count++;
+      }
+      return { ...day, movingAvg: Math.round(sum / count) };
+    });
+
     const weeklyTrend = Array.from(weeklyMap.entries())
       .map(([key, count]) => ({ key, count }))
       .sort((a, b) => a.key.localeCompare(b.key));
@@ -659,7 +672,12 @@ export default function App() {
 
     const topCats = Array.from(catResMap.keys()).slice(0, 5);
     const categoryTrend = Array.from(categoryTrendMap.values()).sort((a, b) => a.date.localeCompare(b.date));
-    const slaTrend = Array.from(slaTrendMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+    
+    // Calculate Compliance Percentage for SLA Trend
+    const slaTrend = Array.from(slaTrendMap.values()).sort((a, b) => a.date.localeCompare(b.date)).map(item => ({
+      ...item,
+      Compliance: (item.OnTime + item.Breached) > 0 ? Math.round((item.OnTime / (item.OnTime + item.Breached)) * 100) : 0
+    }));
 
     return {
       kpis, kpisToday, sparklineArray, maxZoneDivValue, maxTrainCatValue, maxShiftVal, options: opt,
@@ -924,7 +942,7 @@ export default function App() {
     : trendsGranularity === 'week' ? weeklyTrend
       : monthlyTrend;
 
-  // Build category trend pivot for line chart (top 5 categories)
+  // Build category trend pivot for chart (top 5 categories)
   const categoryTrendChartData = categoryTrend.map((row) => {
     const obj = { date: row.date };
     topCats.forEach((c) => { obj[c] = row[c] || 0; });
@@ -1351,26 +1369,29 @@ export default function App() {
                   <div className="flex items-center justify-between">
                     <h3 className="text-base font-bold text-slate-700 dark:text-slate-200">Volume Trend</h3>
                     <div className="inline-flex bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
-                      {['day', 'week', 'month'].map((g) => (
-                        <button
-                          key={g}
-                          onClick={() => setTrendsGranularity(g)}
-                          className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all capitalize ${
-                            trendsGranularity === g
-                              ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-white shadow'
-                              : 'text-slate-500 dark:text-slate-400'
-                          }`}
-                        >
-                          {g}ly
-                        </button>
-                      ))}
+                      {['day', 'week', 'month'].map((g) => {
+                        const label = g === 'day' ? 'Daily' : g.charAt(0).toUpperCase() + g.slice(1) + 'ly';
+                        return (
+                          <button
+                            key={g}
+                            onClick={() => setTrendsGranularity(g)}
+                            className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${
+                              trendsGranularity === g
+                                ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-white shadow'
+                                : 'text-slate-500 dark:text-slate-400'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 
-                  <Card title={`Complaint Volume — ${trendsGranularity}ly`} icon={TrendingUp}>
+                  <Card title={`Complaint Volume — ${trendsGranularity === 'day' ? 'Daily' : trendsGranularity.charAt(0).toUpperCase() + trendsGranularity.slice(1) + 'ly'}`} icon={TrendingUp}>
                     <div className="h-[360px]">
                       <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={trendData} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
+                        <ComposedChart data={trendData} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
                           <defs>
                             <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
                               <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4} />
@@ -1381,8 +1402,10 @@ export default function App() {
                           <XAxis dataKey="key" tick={axisStyle} tickLine={false} axisLine={false} />
                           <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
                           <Tooltip />
+                          <Legend wrapperStyle={{ fontSize: '12px' }} />
                           <Area type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={2} fill="url(#trendGrad)" name="Complaints" />
-                        </AreaChart>
+                          {trendsGranularity === 'day' && <Line type="monotone" dataKey="movingAvg" stroke="#f59e0b" strokeWidth={2} dot={false} name="7-Day Moving Avg" />}
+                        </ComposedChart>
                       </ResponsiveContainer>
                     </div>
                   </Card>
@@ -1390,16 +1413,16 @@ export default function App() {
                   <Card title="Top 5 Categories Trend (Daily)" icon={BarChart}>
                     <div className="h-[360px]">
                       <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={categoryTrendChartData} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
+                        <AreaChart data={categoryTrendChartData} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
                           <XAxis dataKey="date" tick={axisStyle} tickLine={false} axisLine={false} />
                           <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
                           <Tooltip />
                           <Legend wrapperStyle={{ fontSize: '12px' }} />
                           {topCats.map((cat, i) => (
-                            <Line key={String(cat)} type="monotone" dataKey={String(cat)} stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={false} />
+                            <Area key={String(cat)} type="monotone" dataKey={String(cat)} stackId="1" stroke={COLORS[i % COLORS.length]} fill={COLORS[i % COLORS.length]} strokeWidth={1} dot={false} />
                           ))}
-                        </LineChart>
+                        </AreaChart>
                       </ResponsiveContainer>
                     </div>
                   </Card>
@@ -1407,15 +1430,17 @@ export default function App() {
                   <Card title="SLA Performance Trend" icon={Target}>
                     <div className="h-[320px]">
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={slaTrend} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
+                        <ComposedChart data={slaTrend} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
                           <XAxis dataKey="date" tick={axisStyle} tickLine={false} axisLine={false} />
-                          <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
+                          <YAxis yAxisId="left" tick={axisStyle} tickLine={false} axisLine={false} />
+                          <YAxis yAxisId="right" orientation="right" tick={axisStyle} tickLine={false} axisLine={false} tickFormatter={(tick) => `${tick}%`} domain={[0, 100]} />
                           <Tooltip />
                           <Legend wrapperStyle={{ fontSize: '12px' }} />
-                          <Bar dataKey="OnTime" stackId="a" fill="#10b981" name="On Time" />
-                          <Bar dataKey="Breached" stackId="a" fill="#ef4444" name="Breached" />
-                        </BarChart>
+                          <Bar yAxisId="left" dataKey="OnTime" stackId="a" fill="#10b981" name="On Time" />
+                          <Bar yAxisId="left" dataKey="Breached" stackId="a" fill="#ef4444" name="Breached" />
+                          <Line yAxisId="right" type="monotone" dataKey="Compliance" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} name="Compliance %" />
+                        </ComposedChart>
                       </ResponsiveContainer>
                     </div>
                   </Card>
