@@ -144,16 +144,26 @@ const MetricCard = ({ title, value, icon: Icon, subtext, colorClass }) => (
   </div>
 );
 
-// Advanced Date Extractor (Handles timestamps, DD-MM-YYYY, DD/MM/YYYY, etc.)
+// Bulletproof Date Extractor (Handles timestamps, DD-MM-YYYY, DD/MM/YYYY, YY-MM-DD etc.)
 const extractDateFromExcel = (raw) => {
   if (!raw) return null;
   if (typeof raw === 'number') {
-      const d = new Date(Math.round((raw - 25569) * 86400 * 1000));
-      return d.toISOString().split('T')[0];
+      // Excel serial date check (between year 2009 and 2037)
+      if (raw > 40000 && raw < 50000) {
+          const d = new Date(Math.round((raw - 25569) * 86400 * 1000));
+          return d.toISOString().split('T')[0];
+      }
+      return null;
   }
   const str = String(raw).trim();
   
-  // Regex to match Indian format DD-MM-YYYY or DD/MM/YYYY 
+  // Match standard YYYY-MM-DD
+  const matchGlob = str.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (matchGlob) {
+      return `${matchGlob[1]}-${matchGlob[2].padStart(2,'0')}-${matchGlob[3].padStart(2,'0')}`;
+  }
+
+  // Match Indian format DD-MM-YYYY or DD-MM-YY 
   const matchInd = str.match(/(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/);
   if (matchInd) {
       let year = matchInd[3];
@@ -161,16 +171,6 @@ const extractDateFromExcel = (raw) => {
       return `${year}-${matchInd[2].padStart(2,'0')}-${matchInd[1].padStart(2,'0')}`;
   }
   
-  // Regex to match Global format YYYY-MM-DD
-  const matchGlob = str.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
-  if (matchGlob) {
-      return `${matchGlob[1]}-${matchGlob[2].padStart(2,'0')}-${matchGlob[3].padStart(2,'0')}`;
-  }
-
-  try {
-      const d = new Date(raw);
-      if (!isNaN(d)) return d.toISOString().split('T')[0];
-  } catch(e) {}
   return null;
 };
 
@@ -250,14 +250,14 @@ export default function App() {
     return insights;
   }, [fromDate, toDate, currentData]);
 
-  // --- ADVANCED DATA APPEND LOGIC ---
+  // --- HYPER-ROBUST DEEP SCAN APPEND LOGIC ---
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     setIsUploading(true);
     
     const reader = new FileReader();
-    // Using ArrayBuffer instead of BinaryString for robust .xlsx support
+    // Using ArrayBuffer instead of BinaryString for robust .csv and .xlsx support
     reader.onload = async (evt) => {
       try {
         const buffer = evt.target.result;
@@ -276,139 +276,127 @@ export default function App() {
 
         if (targetSheetName && workbook.Sheets) {
            const worksheet = workbook.Sheets[targetSheetName];
-           // Extract with header: 1 to get a matrix array of all cells
+           // Extract with header: 1 to get a raw matrix array of all cells
            const jsonDataArray = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) || [];
            
            if (jsonDataArray.length > 0) {
-             let headerIdx = -1, dateIdx = -1, catIdx = -1, trainIdx = -1;
-             
-             // 1. Deep scan to find which row actually contains the headers (Up to row 20)
-             for(let i = 0; i < Math.min(20, jsonDataArray.length); i++) {
-                 const row = jsonDataArray[i];
-                 if (!row || !Array.isArray(row)) continue;
-                 
-                 const dIdx = row.findIndex(c => String(c).toLowerCase().includes('date') || String(c).toLowerCase().includes('created') || String(c).toLowerCase().includes('time'));
-                 const cIdx = row.findIndex(c => String(c).toLowerCase().includes('category') || String(c).toLowerCase().includes('head') || String(c).toLowerCase().includes('type'));
-                 
-                 // If we find Date OR Category, we assume this is the header row
-                 if (dIdx !== -1 || cIdx !== -1) {
-                     headerIdx = i;
-                     dateIdx = dIdx;
-                     catIdx = cIdx;
-                     trainIdx = row.findIndex(c => String(c).toLowerCase().includes('train'));
-                     break;
-                 }
-             }
-             
-             if (headerIdx !== -1 && dateIdx !== -1) {
-                // -------------------------------------------------------------
-                // SMART EXTRACTION: Found dates, parse row by row below header
-                // -------------------------------------------------------------
-                const groupedByDate = {};
-                
-                for (let i = headerIdx + 1; i < jsonDataArray.length; i++) {
-                   const row = jsonDataArray[i];
-                   if (!row || !row[dateIdx]) continue; // Skip invalid rows
-                   
-                   const dateStr = extractDateFromExcel(row[dateIdx]);
-                   if (!dateStr) continue; 
-                   
-                   if (!groupedByDate[dateStr]) {
-                       groupedByDate[dateStr] = { total: 0, categories: { 'Cleanliness':0, 'Bedroll':0, 'Watering':0, 'Maintenance':0, 'Staff Behavior':0 }, trains: {} };
-                   }
-                   
-                   groupedByDate[dateStr].total += 1;
-                   
-                   if (catIdx !== -1 && row[catIdx]) {
-                       const rawCat = String(row[catIdx]).toLowerCase();
-                       let mappedCat = 'Other';
-                       if (rawCat.includes('clean')) mappedCat = 'Cleanliness';
-                       else if (rawCat.includes('bed') || rawCat.includes('linen')) mappedCat = 'Bedroll';
-                       else if (rawCat.includes('water')) mappedCat = 'Watering';
-                       else if (rawCat.includes('maintain') || rawCat.includes('repair') || rawCat.includes('mech')) mappedCat = 'Maintenance';
-                       else if (rawCat.includes('staff') || rawCat.includes('behav')) mappedCat = 'Staff Behavior';
-                       
-                       if (groupedByDate[dateStr].categories[mappedCat] !== undefined) {
-                           groupedByDate[dateStr].categories[mappedCat] += 1;
-                       }
-                   }
-                   
-                   if (trainIdx !== -1 && row[trainIdx]) {
-                       const trainNo = String(row[trainIdx]).replace(/[^0-9]/g, '').substring(0,5);
-                       if (trainNo && trainNo.length > 3) {
-                           if(!groupedByDate[dateStr].trains[trainNo]) {
-                               groupedByDate[dateStr].trains[trainNo] = { c: 0, a: 0, u: 0 };
-                           }
-                           groupedByDate[dateStr].trains[trainNo].c += 1;
-                           groupedByDate[dateStr].trains[trainNo].u = groupedByDate[dateStr].trains[trainNo].c; // Simplify logic
-                       }
-                   }
-                }
+              const groupedByDate = {};
+              let validRowsFound = 0;
 
-                const datesAppended = [];
-                Object.entries(groupedByDate).forEach(([dStr, groupData]) => {
-                    const newRecord = {
-                        date: dStr,
-                        kpis: { total: groupData.total, resolved: 98.0, time: 60, unsat: 2.0 },
-                        categories: groupData.categories,
-                        trains: groupData.trains, 
-                        shifts: { '08:00 - 12:00': { c: Math.floor(groupData.total*0.4), r: Math.floor(groupData.total*0.35) } }, 
-                        feedback: []
-                    };
-                    const existingIndex = newData.records.findIndex(r => r.date === dStr);
-                    if (existingIndex >= 0) newData.records[existingIndex] = newRecord;
-                    else newData.records.push(newRecord);
-                    datesAppended.push(dStr);
-                });
-                
-                showToast(`Success! Extracted data for ${datesAppended.length} unique dates.`);
+              // Scan EVERY cell in EVERY row to extract data
+              for (let i = 1; i < jsonDataArray.length; i++) { // Start at 1 to skip header
+                  const row = jsonDataArray[i];
+                  if (!row || !Array.isArray(row)) continue;
 
-             } else {
-                // -------------------------------------------------------------
-                // FALLBACK EXTRACTION: No date column found, force to fallbackDate
-                // -------------------------------------------------------------
-                const newRecord = {
-                  date: fallbackDate,
-                  kpis: { total: 0, resolved: 98.0, time: 60, unsat: 3.0 },
-                  categories: { 'Cleanliness': 0, 'Bedroll': 0, 'Watering': 0, 'Maintenance': 0, 'Staff Behavior': 0 },
-                  trains: {}, shifts: {}, feedback: []
-                };
+                  let rowDate = null;
+                  let rowCat = 'Other';
+                  let rowTrain = null;
 
-                // Helper to safely find numbers next to keywords in unstructured sheets
-                const findVal = (keyword) => {
-                  const row = jsonDataArray.find(r => r && r.some(c => String(c).toLowerCase().includes(keyword.toLowerCase())));
-                  if (!row) return 0;
-                  const idx = row.findIndex(c => String(c).toLowerCase().includes(keyword.toLowerCase()));
-                  for(let i=idx+1; i<row.length; i++) {
-                      const num = parseInt(row[i], 10);
-                      if (!isNaN(num)) return num;
+                  for (let j = 0; j < row.length; j++) {
+                      const cellVal = row[j];
+                      if (cellVal === undefined || cellVal === null) continue;
+                      
+                      const cellStr = String(cellVal).trim();
+                      if (!cellStr) continue;
+
+                      // 1. Try to find a valid Date anywhere in the row
+                      if (!rowDate) {
+                          const extracted = extractDateFromExcel(cellVal);
+                          if (extracted) rowDate = extracted;
+                      }
+                      
+                      // 2. Try to classify Category based on keywords anywhere in the row
+                      const lowerCell = cellStr.toLowerCase();
+                      if (rowCat === 'Other') {
+                          if (lowerCell.includes('clean') || lowerCell.includes('dirt')) rowCat = 'Cleanliness';
+                          else if (lowerCell.includes('bed') || lowerCell.includes('linen') || lowerCell.includes('blanket')) rowCat = 'Bedroll';
+                          else if (lowerCell.includes('water') || lowerCell.includes('toilet') || lowerCell.includes('plumb')) rowCat = 'Watering';
+                          else if (lowerCell.includes('maintain') || lowerCell.includes('repair') || lowerCell.includes('mech') || lowerCell.includes('electrical') || lowerCell.includes('equip')) rowCat = 'Maintenance';
+                          else if (lowerCell.includes('staff') || lowerCell.includes('behav') || lowerCell.includes('rude') || lowerCell.includes('bribe')) rowCat = 'Staff Behavior';
+                      }
+
+                      // 3. Try to extract Train Number (5 digits) anywhere in the row
+                      if (!rowTrain) {
+                          const matchTrain = cellStr.match(/\b\d{5}\b/);
+                          if (matchTrain) rowTrain = matchTrain[0];
+                      }
                   }
-                  return 0;
-                };
 
-                const summaryTotal = findVal('total');
-                
-                if (summaryTotal > 0) {
-                    newRecord.kpis.total = summaryTotal;
-                    newRecord.categories['Cleanliness'] = findVal('clean');
-                    newRecord.categories['Bedroll'] = findVal('bed');
-                    newRecord.categories['Watering'] = findVal('water');
-                    newRecord.categories['Maintenance'] = findVal('maintain');
-                    newRecord.categories['Staff Behavior'] = findVal('staff');
-                } else {
-                    newRecord.kpis.total = Math.max(0, jsonDataArray.length - 1);
-                }
+                  // If we found a date, log the record
+                  if (rowDate) {
+                      validRowsFound++;
+                      if (!groupedByDate[rowDate]) {
+                          groupedByDate[rowDate] = { 
+                              total: 0, 
+                              categories: { 'Cleanliness':0, 'Bedroll':0, 'Watering':0, 'Maintenance':0, 'Staff Behavior':0, 'Other':0 }, 
+                              trains: {} 
+                          };
+                      }
+                      
+                      groupedByDate[rowDate].total += 1;
+                      if (groupedByDate[rowDate].categories[rowCat] !== undefined) {
+                          groupedByDate[rowDate].categories[rowCat] += 1;
+                      }
+                      
+                      if (rowTrain) {
+                          if (!groupedByDate[rowDate].trains[rowTrain]) {
+                              groupedByDate[rowDate].trains[rowTrain] = { c: 0, a: 0, u: 0 };
+                          }
+                          groupedByDate[rowDate].trains[rowTrain].c += 1;
+                          groupedByDate[rowDate].trains[rowTrain].u = groupedByDate[rowDate].trains[rowTrain].c; 
+                      }
+                  }
+              }
 
-                const existingIndex = newData.records.findIndex(r => r.date === fallbackDate);
-                if (existingIndex >= 0) newData.records[existingIndex] = newRecord;
-                else newData.records.push(newRecord);
+              // Evaluate extraction results
+              if (validRowsFound > 0) {
+                  const datesAppended = [];
+                  Object.entries(groupedByDate).forEach(([dStr, groupData]) => {
+                      const newRecord = {
+                          date: dStr,
+                          kpis: { total: groupData.total, resolved: 98.0, time: 60, unsat: 2.0 },
+                          categories: groupData.categories,
+                          trains: groupData.trains, 
+                          shifts: { '08:00 - 12:00': { c: Math.floor(groupData.total*0.4), r: Math.floor(groupData.total*0.35) } }, 
+                          feedback: []
+                      };
+                      const existingIndex = newData.records.findIndex(r => r.date === dStr);
+                      if (existingIndex >= 0) newData.records[existingIndex] = newRecord;
+                      else newData.records.push(newRecord);
+                      datesAppended.push(dStr);
+                  });
+                  
+                  showToast(`Success! Extracted ${validRowsFound} cases across ${datesAppended.length} unique dates.`);
+              } else {
+                  // Absolute Fallback (Only if literally 0 dates were found in the entire document)
+                  const newRecord = {
+                    date: fallbackDate,
+                    kpis: { total: Math.max(0, jsonDataArray.length - 1), resolved: 98.0, time: 60, unsat: 3.0 },
+                    categories: { 'Cleanliness': 0, 'Bedroll': 0, 'Watering': 0, 'Maintenance': 0, 'Staff Behavior': 0 },
+                    trains: {}, shifts: {}, feedback: []
+                  };
 
-                showToast(`No Date column found. Appended data to fallback date: ${fallbackDate}.`);
-             }
+                  const existingIndex = newData.records.findIndex(r => r.date === fallbackDate);
+                  if (existingIndex >= 0) newData.records[existingIndex] = newRecord;
+                  else newData.records.push(newRecord);
+
+                  showToast(`No dates found anywhere in file. Appended ${newRecord.kpis.total} cases to fallback date: ${fallbackDate}.`);
+              }
            }
         }
         
-        // Push final state to database
+        // 1. Force optimistic UI update instantly
+        setDbData(newData);
+        setLastSync(new Date().toLocaleTimeString());
+        
+        // 2. Auto-adjust timeline filters to show the newly added data
+        if (newData.records.length > 0) {
+            const sortedDates = [...newData.records].map(r => r.date).sort();
+            setFromDate(sortedDates[0]);
+            setToDate(sortedDates[sortedDates.length - 1]);
+        }
+
+        // 3. Push final state to database in background
         const { error } = await supabase.from('railmadad_sync').update({ 
             json_data: newData, 
             last_updated: new Date().toISOString() 
@@ -416,16 +404,9 @@ export default function App() {
           
         if (error) throw error;
         
-        // --- AUTO-UPDATE TIMELINE TO SHOW NEW DATA IMMEDIATELY ---
-        if (newData.records.length > 0) {
-            const sortedDates = [...newData.records].map(r => r.date).sort();
-            setFromDate(sortedDates[0]);
-            setToDate(sortedDates[sortedDates.length - 1]);
-        }
-        
       } catch (err) {
         console.error(err);
-        showToast("Error processing Excel. Please check the file format.");
+        showToast("Error processing Excel. Please check the file structure.");
       }
       
       setIsUploading(false);
@@ -437,19 +418,20 @@ export default function App() {
   const executeHardReset = async () => {
     setShowResetModal(false);
     showToast("Resetting database...");
+    
+    // Optimistic UI clear
+    setDbData(initialRawDatabase); 
+    const today = new Date().toISOString().split('T')[0];
+    setFromDate(today);
+    setToDate(today);
+
     try {
-      setDbData(initialRawDatabase); // Empty state
       const { error } = await supabase.from('railmadad_sync').update({ 
           json_data: initialRawDatabase, 
           last_updated: new Date().toISOString() 
       }).eq('id', 1);
       if (error) throw error;
       showToast("Database successfully wiped clean.");
-      
-      // Reset dates as well
-      const today = new Date().toISOString().split('T')[0];
-      setFromDate(today);
-      setToDate(today);
     } catch (err) {
       showToast("Error resetting database.");
     }
@@ -522,7 +504,7 @@ export default function App() {
               ) : (
                 <>
                   <Upload className="w-4 h-4 mr-2" />
-                  <span className="text-sm font-bold">Upload Excel</span>
+                  <span className="text-sm font-bold">Upload CSV/Excel</span>
                   <input type="file" accept=".csv, .xlsx" className="hidden" onChange={handleFileUpload} disabled={isUploading}/>
                 </>
               )}
@@ -622,7 +604,7 @@ export default function App() {
                <p className="text-slate-500 mt-3 max-w-md leading-relaxed">
                  The database is currently empty for the selected dates ({fromDate} to {toDate}). 
                  <br/><br/>
-                 Upload your DRM Daily Summary Excel files using the sidebar to populate the dashboard.
+                 Upload your DRM Daily Summary CSV/Excel files using the sidebar to populate the dashboard.
                </p>
              </div>
           )}
@@ -685,7 +667,7 @@ export default function App() {
                 <h3 className="text-base font-bold text-slate-800 mb-6">Top Culprit Trains (Period)</h3>
                 <div className="h-80">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={currentData.trains} layout="vertical" margin={{ left: 60, right: 20 }}>
+                    <BarChart data={currentData.trains.slice(0, 15)} layout="vertical" margin={{ left: 60, right: 20 }}>
                       <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
                       <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
                       <YAxis dataKey="train" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#334155', fontWeight: 500 }} dx={-10} />
