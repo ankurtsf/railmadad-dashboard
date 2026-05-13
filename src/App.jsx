@@ -6,12 +6,11 @@ import {
 import { 
   LayoutDashboard, TrainFront, Clock, MessageSquareWarning, 
   Sparkles, Menu, X, AlertTriangle, CheckCircle, Upload, 
-  Calendar, Trash2, Cpu, FileSpreadsheet, Bug, BarChart3, Map as MapIcon, Filter
+  Calendar, Trash2, Cpu, FileSpreadsheet, Bug, BarChart3, Map as MapIcon, Filter, Bot
 } from 'lucide-react';
 
 const COLORS = ['#3b82f6', '#8b5cf6', '#0ea5e9', '#f59e0b', '#ef4444', '#10b981', '#6366f1', '#f43f5e', '#a855f7', '#ec4899'];
 
-// Initial empty state
 const initialRawDatabase = { records: [] };
 
 // --- STABLE RAW DATA PARSERS ---
@@ -19,11 +18,8 @@ const initialRawDatabase = { records: [] };
 const parseRawDate = (raw) => {
     if (!raw) return null;
     const str = String(raw).trim();
-    
-    // Ignore long numeric strings like Reference Numbers
     if (/^\d+\.\d+$/.test(str) && str.length > 10) return null; 
 
-    // Handle Excel serial date numbers
     if (!isNaN(Number(raw)) && typeof raw === 'number' && raw > 40000 && raw < 70000) {
         const d = new Date(Math.round((raw - 25569) * 86400 * 1000));
         const hour = d.getUTCHours();
@@ -34,7 +30,6 @@ const parseRawDate = (raw) => {
         };
     }
 
-    // Match DD-MM-YY HH:MM or similar variations
     const match = str.match(/^(\d{1,4})[-/.](\d{1,2})[-/.](\d{1,4})(?:\s+(\d{1,2}):(\d{2}))?/);
     if (!match) return null;
 
@@ -104,7 +99,6 @@ export default function App() {
   const [dbData, setDbData] = useState(initialRawDatabase);
   const [supabaseClient, setSupabaseClient] = useState(null);
 
-  // Filters
   const todayStr = new Date().toISOString().split('T')[0];
   const lastMonthStr = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   
@@ -121,7 +115,6 @@ export default function App() {
     setTimeout(() => setToastMessage(''), 6000);
   };
 
-  // Inject Dependencies
   useEffect(() => {
     const loadDependencies = async () => {
       try {
@@ -152,7 +145,6 @@ export default function App() {
     loadDependencies();
   }, []);
 
-  // Persistent fetch from Supabase
   const fetchCloudData = async () => {
     if (!supabaseClient) return;
     try {
@@ -184,7 +176,6 @@ export default function App() {
     fetchCloudData();
   }, [supabaseClient]);
 
-  // --- CORE ANALYTICS ENGINE ---
   const aggregated = useMemo(() => {
     const validRecords = (dbData.records || []).filter(r => {
         if (r.date < fromDate || r.date > toDate) return false;
@@ -257,8 +248,18 @@ export default function App() {
        avgResTime: recordsWithResTime > 0 ? formatMinutesToTime(totalResTime / recordsWithResTime) : "N/A",
     };
 
+    const aiInsights = [];
+    if (kpis.total > 0) {
+        const topTrain = Object.values(trainMap).sort((a,b) => b.Total - a.Total)[0];
+        const topCat = Object.values(catMomMap).sort((a,b) => b.Total - a.Total)[0];
+        if (topTrain) aiInsights.push(`Action Required: Train ${topTrain.train} has the highest volume (${topTrain.Total} complaints).`);
+        if (topCat) aiInsights.push(`Focus Area: ${topCat.category} is the leading complaint type across all zones.`);
+        if (parseFloat(kpis.unsat) > 5) aiInsights.push(`Quality Alert: Unsatisfactory feedback is high (${kpis.unsat}%). Review staff closing remarks.`);
+    }
+
     return { 
         kpis, 
+        aiInsights,
         momData: Object.entries(momMap).map(([month, count]) => ({ month, count })).sort((a,b) => a.month.localeCompare(b.month)),
         catMomData: Object.entries(catMomMap).map(([category, counts]) => ({ category, ...counts })).sort((a,b) => b.Total - a.Total),
         monthsSorted: Array.from(mSet).sort(),
@@ -276,9 +277,8 @@ export default function App() {
     };
   }, [dbData, fromDate, toDate, selectedZone, selectedStatus]);
 
-  const { kpis, momData, catMomData, monthsSorted, trainData, uniqueCats, feedbackData, unsatTable, pestTable, shiftData, zoneData, coachData, statusData, availableZones, availableStatuses } = aggregated;
+  const { kpis, aiInsights, momData, catMomData, monthsSorted, trainData, uniqueCats, feedbackData, unsatTable, pestTable, shiftData, zoneData, coachData, statusData, availableZones, availableStatuses } = aggregated;
 
-  // --- STABLE FILE PARSER ---
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file || !window.XLSX || !supabaseClient) {
@@ -324,7 +324,7 @@ export default function App() {
             return (idx !== undefined && row[idx] !== undefined) ? row[idx] : null;
         };
 
-        const existingMap = new window.Map(); // Use window.Map explicitly to avoid shadowing conflict
+        const existingMap = new window.Map();
         const baseRecords = dbData.records || [];
         baseRecords.forEach(r => existingMap.set(String(r.id), r));
 
@@ -428,7 +428,7 @@ export default function App() {
               <AlertTriangle className="w-6 h-6" />
             </div>
             <h3 className="text-xl font-bold text-slate-800 mb-2">Wipe Database?</h3>
-            <p className="text-sm text-slate-500 mb-6 leading-relaxed">This will permanently delete all raw data locally and in the cloud.</p>
+            <p className="text-sm text-slate-500 mb-6 leading-relaxed">Permanently delete all raw data locally and in cloud.</p>
             <div className="flex space-x-3">
               <button onClick={() => setShowResetModal(false)} className="flex-1 py-2.5 rounded-lg border border-slate-200 text-slate-600 font-semibold text-sm hover:bg-slate-50 transition-colors">Cancel</button>
               <button onClick={executeHardReset} className="flex-1 py-2.5 rounded-lg bg-rose-600 text-white font-semibold text-sm hover:bg-rose-700 transition-colors shadow-sm shadow-rose-200">Yes, Wipe Data</button>
@@ -540,6 +540,20 @@ export default function App() {
             <>
               {activeTab === 'overview' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className="bg-gradient-to-r from-indigo-50 to-blue-50 border border-indigo-100 rounded-xl p-5 shadow-sm">
+                    <div className="flex items-center mb-4">
+                        <Bot className="w-5 h-5 text-indigo-600 mr-2" />
+                        <h3 className="text-sm font-bold text-indigo-900 uppercase tracking-widest">AI Insights & Warnings</h3>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {aiInsights.map((insight, idx) => (
+                            <div key={idx} className="bg-white/80 p-3 rounded-lg border border-indigo-50 text-xs font-medium text-slate-700 flex items-start">
+                                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-1 mr-2 shrink-0"></span>
+                                {insight}
+                            </div>
+                        ))}
+                    </div>
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                     <MetricCard title="Filtered Cases" value={String(kpis.total)} icon={LayoutDashboard} colorClass="bg-blue-600 text-white" />
                     <MetricCard title="Avg Resolution Time" value={String(kpis.avgResTime)} icon={Clock} colorClass="bg-emerald-600 text-white" />
@@ -584,11 +598,11 @@ export default function App() {
               {activeTab === 'trains' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm h-fit">
-                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Top 15 Affected Trains</h3>
+                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Affected Trains Analysis</h3>
                     <div className="h-[400px]"><ResponsiveContainer width="100%" height="100%"><BarChart data={trainData.slice(0, 15)} layout="vertical" margin={{ left: 60, right: 20 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" /><XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} /><YAxis dataKey="train" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#334155', fontWeight: 600 }} dx={-10} /><Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} /><Bar dataKey="Total" name="Total Cases" fill="#8b5cf6" radius={[0, 6, 6, 0]} barSize={20} /></BarChart></ResponsiveContainer></div>
                   </div>
                   <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden h-fit">
-                    <div className="px-6 py-5 border-b border-slate-100 bg-slate-50"><h3 className="text-base font-bold text-slate-800">Train vs. Category Matrix</h3></div>
+                    <div className="px-6 py-5 border-b border-slate-100 bg-slate-50"><h3 className="text-base font-bold text-slate-800">Train Number vs. Category Matrix</h3></div>
                     <div className="overflow-x-auto max-h-[600px]">
                       <table className="min-w-full text-left border-collapse"><thead className="sticky top-0 bg-slate-100 z-10 shadow-sm"><tr className="text-slate-500 text-[10px] uppercase tracking-widest"><th className="p-4 font-bold border-b border-slate-200">Train</th>{uniqueCats.map(c => <th key={String(c)} className="p-4 font-bold border-b border-slate-200 whitespace-nowrap">{String(c)}</th>)}<th className="p-4 font-black border-b border-slate-200 text-slate-800">Total</th></tr></thead>
                         <tbody className="text-sm text-slate-700 divide-y divide-slate-100">{trainData.map((row, idx) => (<tr key={idx} className="hover:bg-slate-50 transition-colors"><td className="p-4 font-bold flex items-center text-slate-900 whitespace-nowrap"><TrainFront className="w-4 h-4 mr-2 text-indigo-400" />{String(row.train)}</td>{uniqueCats.map(c => <td key={String(c)} className="p-4 font-medium text-slate-600">{String(row[c] || '-')}</td>)}<td className="p-4 font-black text-indigo-600">{String(row.Total)}</td></tr>))}</tbody>
@@ -621,7 +635,7 @@ export default function App() {
                         <div className="h-64"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={feedbackData} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={4} dataKey="value">{feedbackData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}</Pie><Tooltip /><Legend verticalAlign="bottom" height={36} iconType="circle" /></PieChart></ResponsiveContainer></div>
                     </div>
                     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-                       <div className="px-6 py-5 border-b border-slate-100 bg-rose-50 flex items-center"><MessageSquareWarning className="w-5 h-5 text-rose-600 mr-2" /><h3 className="text-base font-bold text-rose-900">Unsatisfactory Feedback Cases</h3></div>
+                       <div className="px-6 py-5 border-b border-slate-100 bg-rose-50 flex items-center"><MessageSquareWarning className="w-5 h-5 text-rose-600 mr-2" /><h3 className="text-base font-bold text-rose-900">Highest Feedback: Unsatisfactory Cases</h3></div>
                        {unsatTable.length === 0 ? (<div className="p-8 text-center text-slate-500 font-medium">No results found.</div>) : (
                          <div className="overflow-x-auto max-h-96"><table className="min-w-full text-left border-collapse"><thead className="sticky top-0 bg-white shadow-sm z-10"><tr className="text-slate-400 text-[10px] uppercase tracking-widest border-b border-slate-100"><th className="p-4 font-bold">Ref No.</th><th className="p-4 font-bold">Train</th><th className="p-4 font-bold">Desc</th></tr></thead><tbody className="text-sm text-slate-700 divide-y divide-slate-100">{unsatTable.map((row, idx) => (<tr key={idx} className="hover:bg-slate-50"><td className="p-4 font-mono text-[10px] text-slate-400 whitespace-nowrap">{String(row.id)}</td><td className="p-4 font-bold text-slate-800">{String(row.train)}</td><td className="p-4 text-xs text-slate-600 max-w-md">{String(row.desc)}</td></tr>))}</tbody></table></div>
                        )}
