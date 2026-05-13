@@ -6,11 +6,12 @@ import {
 import { 
   LayoutDashboard, TrainFront, Clock, MessageSquareWarning, 
   Sparkles, Menu, X, AlertTriangle, CheckCircle, Upload, 
-  Calendar, Trash2, Cpu, FileSpreadsheet, Bug, BarChart3, Map as MapIcon, Filter, Bot
+  Calendar, Trash2, Cpu, FileSpreadsheet, Bug, BarChart3, Map as MapIcon, Filter, Bot, Loader2
 } from 'lucide-react';
 
 const COLORS = ['#3b82f6', '#8b5cf6', '#0ea5e9', '#f59e0b', '#ef4444', '#10b981', '#6366f1', '#f43f5e', '#a855f7', '#ec4899'];
 
+// Strictly empty initial state.
 const initialRawDatabase = { records: [] };
 
 // --- STABLE RAW DATA PARSERS ---
@@ -18,8 +19,11 @@ const initialRawDatabase = { records: [] };
 const parseRawDate = (raw) => {
     if (!raw) return null;
     const str = String(raw).trim();
+    
+    // Ignore floating point reference numbers masquerading as strings
     if (/^\d+\.\d+$/.test(str) && str.length > 10) return null; 
 
+    // Handle Excel serial number conversion
     if (!isNaN(Number(raw)) && typeof raw === 'number' && raw > 40000 && raw < 70000) {
         const d = new Date(Math.round((raw - 25569) * 86400 * 1000));
         const hour = d.getUTCHours();
@@ -30,6 +34,7 @@ const parseRawDate = (raw) => {
         };
     }
 
+    // Match DD-MM-YY HH:MM format from raw CSV
     const match = str.match(/^(\d{1,4})[-/.](\d{1,2})[-/.](\d{1,4})(?:\s+(\d{1,2}):(\d{2}))?/);
     if (!match) return null;
 
@@ -95,10 +100,12 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [lastSync, setLastSync] = useState('Checking Cloud...');
   const [dbData, setDbData] = useState(initialRawDatabase);
   const [supabaseClient, setSupabaseClient] = useState(null);
 
+  // Filters
   const todayStr = new Date().toISOString().split('T')[0];
   const lastMonthStr = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   
@@ -115,6 +122,7 @@ export default function App() {
     setTimeout(() => setToastMessage(''), 6000);
   };
 
+  // 1. Inject Dependencies Dynamically (Required for Canvas Environment)
   useEffect(() => {
     const loadDependencies = async () => {
       try {
@@ -140,27 +148,34 @@ export default function App() {
         setSupabaseClient(window.supabase.createClient(url, key));
       } catch (err) {
         console.error("Dependency loading failed", err);
+        setIsLoading(false);
       }
     };
     loadDependencies();
   }, []);
 
-  const fetchCloudData = async () => {
-    if (!supabaseClient) return;
+  // 2. Fetch Data from Supabase (Persistent State)
+  const fetchCloudData = async (client) => {
+    if (!client) return;
     try {
-      const { data, error } = await supabaseClient.from('railmadad_sync').select('*').eq('id', 1).single();
+      const { data, error } = await client.from('railmadad_sync').select('*').eq('id', 1).single();
+      
       if (error) {
-          if (error.code === 'PGRST116') {
-              await supabaseClient.from('railmadad_sync').insert([{ id: 1, json_data: initialRawDatabase }]);
-          }
-          setLastSync("Storage Ready");
-          return;
+        if (error.code === 'PGRST116') {
+          // Record doesn't exist yet, insert initial state
+          await client.from('railmadad_sync').insert([{ id: 1, json_data: initialRawDatabase }]);
+        }
+        setLastSync("Cloud Ready");
+        setIsLoading(false);
+        return;
       }
+
       if (data && data.json_data && data.json_data.records) {
         setDbData(data.json_data);
         setLastSync(new Date(data.last_updated || Date.now()).toLocaleTimeString());
         
-        if (dbData.records.length === 0 && data.json_data.records.length > 0) {
+        // Auto-adjust timeline if data exists
+        if (data.json_data.records.length > 0) {
             const sortedDates = [...data.json_data.records].map(r => r.date).sort();
             setFromDate(sortedDates[0]);
             setToDate(sortedDates[sortedDates.length - 1]);
@@ -168,14 +183,19 @@ export default function App() {
       }
     } catch (err) { 
       console.error("Cloud fetch failed", err); 
-      setLastSync("Cloud Offline");
+      setLastSync("Cloud error");
+    } finally {
+      setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchCloudData();
+    if (supabaseClient) {
+      fetchCloudData(supabaseClient);
+    }
   }, [supabaseClient]);
 
+  // --- CORE ANALYTICS AGGREGATOR ---
   const aggregated = useMemo(() => {
     const validRecords = (dbData.records || []).filter(r => {
         if (r.date < fromDate || r.date > toDate) return false;
@@ -184,8 +204,8 @@ export default function App() {
         return true;
     });
     
-    const zoneSet = new Set();
-    const statusSet = new Set();
+    const zoneSet = new window.Set();
+    const statusSet = new window.Set();
     (dbData.records || []).forEach(r => {
         if(r.zone && r.zone !== 'Unknown') zoneSet.add(r.zone);
         if(r.status && r.status !== 'Unknown') statusSet.add(r.status);
@@ -198,9 +218,9 @@ export default function App() {
 
     const momMap = {};
     const catMomMap = {};
-    const mSet = new Set();
+    const mSet = new window.Set();
     const trainMap = {};
-    const catSet = new Set();
+    const catSet = new window.Set();
     const feedbackMap = {};
     const shiftMap = { '00:00 - 08:00': 0, '08:00 - 16:00': 0, '16:00 - 24:00': 0 };
     const zoneMap = {};
@@ -258,8 +278,7 @@ export default function App() {
     }
 
     return { 
-        kpis, 
-        aiInsights,
+        kpis, aiInsights,
         momData: Object.entries(momMap).map(([month, count]) => ({ month, count })).sort((a,b) => a.month.localeCompare(b.month)),
         catMomData: Object.entries(catMomMap).map(([category, counts]) => ({ category, ...counts })).sort((a,b) => b.Total - a.Total),
         monthsSorted: Array.from(mSet).sort(),
@@ -279,6 +298,7 @@ export default function App() {
 
   const { kpis, aiInsights, momData, catMomData, monthsSorted, trainData, uniqueCats, feedbackData, unsatTable, pestTable, shiftData, zoneData, coachData, statusData, availableZones, availableStatuses } = aggregated;
 
+  // --- STABLE FILE PARSER ---
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file || !window.XLSX || !supabaseClient) {
@@ -296,7 +316,7 @@ export default function App() {
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
         const rawArray = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
         
-        if (!rawArray || rawArray.length === 0) throw new Error("Empty file.");
+        if (!rawArray || rawArray.length === 0) throw new Error("File is empty.");
 
         let headerRowIdx = -1;
         let colMap = {};
@@ -386,15 +406,21 @@ export default function App() {
             const sortedDates = [...newData.records].map(r => r.date).sort();
             setFromDate(sortedDates[0]); setToDate(sortedDates[sortedDates.length - 1]);
             showToast(`Added ${newRecordsAdded} records.`);
+            
+            // Critical Cloud Upsert
             await supabaseClient.from('railmadad_sync').upsert({ id: 1, json_data: newData, last_updated: new Date().toISOString() });
         } else {
-            showToast("No new records detected.");
+            showToast("No new records were added.");
         }
       } catch (err) {
         console.error("Parse Error:", err);
         showToast("Error processing file format.");
       }
       setIsUploading(false); e.target.value = null; 
+    };
+    reader.onerror = () => {
+        showToast("Error reading file buffer.");
+        setIsUploading(false);
     };
     reader.readAsArrayBuffer(file);
   };
@@ -412,8 +438,20 @@ export default function App() {
     } catch (err) { showToast("Cloud reset failed."); }
   };
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="flex flex-col items-center">
+          <Loader2 className="w-12 h-12 text-indigo-600 animate-spin mb-4" />
+          <p className="text-slate-600 font-bold text-lg animate-pulse tracking-wide uppercase">Injected Live Modules...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans text-slate-900 relative">
+      {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 bg-slate-800 text-white px-6 py-4 rounded-xl shadow-2xl z-50 flex items-center animate-bounce border border-slate-700">
           <Sparkles className="w-5 h-5 mr-3 text-indigo-400" />
@@ -421,6 +459,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Hard Reset Modal */}
       {showResetModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white p-6 rounded-2xl shadow-xl max-w-sm w-full border border-slate-100 transform transition-all">
@@ -437,6 +476,7 @@ export default function App() {
         </div>
       )}
       
+      {/* SIDEBAR */}
       <aside className={`fixed md:sticky top-0 left-0 z-40 w-64 h-screen transition-transform transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 bg-white border-r border-slate-200 shadow-sm flex flex-col`}>
         <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-indigo-700">
           <div>
@@ -489,6 +529,7 @@ export default function App() {
       </aside>
 
       <main className="flex-1 flex flex-col max-w-full overflow-hidden bg-slate-50">
+        
         <header className="md:hidden bg-indigo-700 text-white p-4 flex justify-between items-center sticky top-0 z-30 shadow-md">
           <h1 className="text-lg font-bold flex items-center"><TrainFront className="w-5 h-5 mr-2"/> RailMadad</h1>
           <button onClick={() => setIsMobileMenuOpen(true)}><Menu className="w-6 h-6" /></button>
@@ -496,6 +537,7 @@ export default function App() {
 
         <div className="bg-white border-b border-slate-200 px-4 md:px-8 py-4 flex flex-col lg:flex-row justify-between items-start lg:items-center space-y-4 lg:space-y-0 z-20 sticky top-0 md:top-0 shadow-sm">
            <h2 className="text-xl font-black text-slate-800 tracking-tight">{String(navItemsList.find(i => i.id === activeTab)?.label)}</h2>
+           
            <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-3 sm:space-y-0 sm:space-x-4 bg-slate-50 border border-slate-200 p-2 rounded-xl flex-wrap">
               <div className="flex items-center text-sm">
                  <Filter className="w-4 h-4 text-indigo-500 mr-2 shrink-0" />
@@ -538,6 +580,7 @@ export default function App() {
              </div>
           ) : (
             <>
+              {/* TAB 1: OVERVIEW */}
               {activeTab === 'overview' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="bg-gradient-to-r from-indigo-50 to-blue-50 border border-indigo-100 rounded-xl p-5 shadow-sm">
@@ -598,7 +641,7 @@ export default function App() {
               {activeTab === 'trains' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm h-fit">
-                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Affected Trains Analysis</h3>
+                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Top 15 Affected Trains</h3>
                     <div className="h-[400px]"><ResponsiveContainer width="100%" height="100%"><BarChart data={trainData.slice(0, 15)} layout="vertical" margin={{ left: 60, right: 20 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" /><XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} /><YAxis dataKey="train" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#334155', fontWeight: 600 }} dx={-10} /><Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} /><Bar dataKey="Total" name="Total Cases" fill="#8b5cf6" radius={[0, 6, 6, 0]} barSize={20} /></BarChart></ResponsiveContainer></div>
                   </div>
                   <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden h-fit">
@@ -637,7 +680,13 @@ export default function App() {
                     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
                        <div className="px-6 py-5 border-b border-slate-100 bg-rose-50 flex items-center"><MessageSquareWarning className="w-5 h-5 text-rose-600 mr-2" /><h3 className="text-base font-bold text-rose-900">Highest Feedback: Unsatisfactory Cases</h3></div>
                        {unsatTable.length === 0 ? (<div className="p-8 text-center text-slate-500 font-medium">No results found.</div>) : (
-                         <div className="overflow-x-auto max-h-96"><table className="min-w-full text-left border-collapse"><thead className="sticky top-0 bg-white shadow-sm z-10"><tr className="text-slate-400 text-[10px] uppercase tracking-widest border-b border-slate-100"><th className="p-4 font-bold">Ref No.</th><th className="p-4 font-bold">Train</th><th className="p-4 font-bold">Desc</th></tr></thead><tbody className="text-sm text-slate-700 divide-y divide-slate-100">{unsatTable.map((row, idx) => (<tr key={idx} className="hover:bg-slate-50"><td className="p-4 font-mono text-[10px] text-slate-400 whitespace-nowrap">{String(row.id)}</td><td className="p-4 font-bold text-slate-800">{String(row.train)}</td><td className="p-4 text-xs text-slate-600 max-w-md">{String(row.desc)}</td></tr>))}</tbody></table></div>
+                         <div className="overflow-x-auto max-h-96"><table className="min-w-full text-left border-collapse"><thead className="sticky top-0 bg-white shadow-sm z-10"><tr className="text-slate-400 text-[10px] uppercase tracking-widest border-b border-slate-100"><th className="p-4 font-bold">Ref No.</th><th className="p-4 font-bold">Train</th><th className="p-4 font-bold">Desc</th></tr></thead><tbody className="text-sm text-slate-700 divide-y divide-slate-100">{unsatTable.map((row, idx) => (
+                           <tr key={idx} className="hover:bg-slate-50">
+                             <td className="p-4 font-mono text-[10px] text-slate-400 whitespace-nowrap">{String(row.id)}</td>
+                             <td className="p-4 font-bold text-slate-800">{String(row.train)}</td>
+                             <td className="p-4 text-xs text-slate-600 max-w-md">{String(row.desc)}</td>
+                           </tr>
+                         ))}</tbody></table></div>
                        )}
                     </div>
                   </div>
