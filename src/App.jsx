@@ -150,16 +150,16 @@ const navItemsList = [
 ];
 
 const MetricCard = ({ title, value, todayValue, icon: Icon, accent, sparkColor, sparklineData, dataKey, onTodayClick, infoText, isCritical, extraIcon, subtext }) => (
-  <div className={`relative hover:z-50 bg-white dark:bg-slate-900 rounded-xl p-5 shadow-sm border ${isCritical ? 'border-rose-400 bg-rose-50 dark:bg-rose-950/20' : 'border-slate-100 dark:border-slate-800'} flex flex-col justify-between transition-colors h-32`}>
+  <div className={`relative hover:z-[100] bg-white dark:bg-slate-900 rounded-xl p-5 shadow-sm border ${isCritical ? 'border-rose-400 bg-rose-50 dark:bg-rose-950/20' : 'border-slate-100 dark:border-slate-800'} flex flex-col justify-between transition-colors h-32`}>
     <div className="relative z-10 flex justify-between items-start mb-1">
       <div className="flex items-center">
         <p className={`text-[11px] font-bold uppercase tracking-wider ${isCritical ? 'text-rose-700 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400'}`}>{title}</p>
         {infoText && (
           <div className="relative group ml-1.5 flex items-center justify-center">
             <div className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[9px] font-black cursor-help ${isCritical ? 'bg-rose-200 text-rose-700 dark:bg-rose-900 dark:text-rose-300' : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>i</div>
-            <div className="absolute bottom-full right-[-50px] md:left-1/2 md:-translate-x-1/2 mb-2 w-48 p-2.5 bg-slate-800 dark:bg-slate-700 text-white text-xs font-medium rounded-lg shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 text-center leading-tight">
+            <div className="absolute top-full right-[-10px] md:left-1/2 md:-translate-x-1/2 mt-2 w-48 p-2.5 bg-slate-800 dark:bg-slate-700 text-white text-xs font-medium rounded-lg shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-[999] text-center leading-tight">
               {infoText}
-              <div className="absolute top-full right-8 md:left-1/2 md:-translate-x-1/2 border-4 border-transparent border-t-slate-800 dark:border-t-slate-700"></div>
+              <div className="absolute bottom-full right-3 md:left-1/2 md:-translate-x-1/2 border-4 border-transparent border-b-slate-800 dark:border-b-slate-700"></div>
             </div>
           </div>
         )}
@@ -178,9 +178,11 @@ const MetricCard = ({ title, value, todayValue, icon: Icon, accent, sparkColor, 
         </div>
         
         {subtext && (
-            <span className={`text-xs font-bold mt-1 truncate ${isCritical ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400'}`}>
-              {subtext}
-            </span>
+            <div className="mt-1">
+              <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded border truncate max-w-full ${isCritical ? 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}>
+                {subtext}
+              </span>
+            </div>
         )}
         
         {todayValue !== undefined && onTodayClick && (
@@ -614,6 +616,7 @@ export default function App() {
       sparkObj.total++;
       if (isToday) kpisToday.total++;
 
+      // BUG FIX: Added 'bed roll' to match un-concatenated strings
       if (catLow.includes('bedroll') || catLow.includes('bed roll') || catLow.includes('linen')) { kpis.bedroll++; sparkObj.bedroll++; if(isToday) kpisToday.bedroll++; }
       if (catLow.includes('clean') || catLow.includes('dirt')) { kpis.clean++; sparkObj.clean++; if(isToday) kpisToday.clean++; }
       if (catLow.includes('water') || catLow.includes('plumb')) { kpis.water++; sparkObj.water++; if(isToday) kpisToday.water++; }
@@ -1198,7 +1201,7 @@ export default function App() {
                 onClick={() => { setActiveTab(item.id); setIsMobileMenuOpen(false); }}
                 className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-all ${
                   isActive
-                    ? 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 shadow-sm border border-indigo-100 dark:border-indigo-900'
+                    ? 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 shadow-sm border border-indigo-100 dark:border-slate-800'
                     : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/60 border border-transparent'
                 }`}
               >
