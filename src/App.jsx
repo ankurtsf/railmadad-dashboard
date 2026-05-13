@@ -11,17 +11,12 @@ import {
   Target, Moon, Sun, Download, TrendingUp, LogOut, Lock, Mail,
   Eye, EyeOff, FileText, FileBarChart
 } from 'lucide-react';
-import { createClient } from '@supabase/supabase-js';
-import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 
 // ──────────────────────────────────────────────────────────────────
 // CONFIG (Note: in production, move these to env variables)
 // ──────────────────────────────────────────────────────────────────
 const SUPABASE_URL = 'https://npfuxifktdmxmzprfcxm.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZnV4aWZrdGRteG16cHJmY3htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2MjMwMDMsImV4cCI6MjA5NDE5OTAwM30.cCheIUxTAQWyoVyIwOLRd5usiyFI-q2GIn3A9NPFL78';
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const COLORS = ['#6366f1', '#8b5cf6', '#0ea5e9', '#f59e0b', '#ef4444', '#10b981', '#f43f5e', '#a855f7', '#ec4899', '#14b8a6'];
 
@@ -87,6 +82,19 @@ const getWeekKey = (dateStr) => {
   return `${d.getFullYear()}-W${String(week).padStart(2, '0')}`;
 };
 
+// Heatmap Color Generator Helper
+const getHeatmapColor = (val, max, type) => {
+  if (!val) return { bg: 'transparent', text: 'inherit' };
+  const intensity = Math.max(0.1, val / max);
+  const isDark = intensity > 0.55;
+
+  if (type === 'blue') {
+     return { bg: `rgba(59, 130, 246, ${intensity})`, text: isDark ? '#ffffff' : 'inherit' };
+  } else {
+     return { bg: `rgba(239, 68, 68, ${intensity})`, text: isDark ? '#ffffff' : 'inherit' };
+  }
+};
+
 // ──────────────────────────────────────────────────────────────────
 // NAVIGATION
 // ──────────────────────────────────────────────────────────────────
@@ -101,9 +109,9 @@ const navItemsList = [
 // ──────────────────────────────────────────────────────────────────
 // REUSABLE COMPONENTS
 // ──────────────────────────────────────────────────────────────────
-const MetricCard = ({ title, value, icon: Icon, accent }) => (
-  <div className="bg-white dark:bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col justify-between transition-colors">
-    <div className="flex justify-between items-start mb-2">
+const MetricCard = ({ title, value, todayValue, icon: Icon, accent, sparkColor, sparklineData, dataKey }) => (
+  <div className="relative bg-white dark:bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col justify-between overflow-hidden transition-colors h-32">
+    <div className="relative z-10 flex justify-between items-start mb-1">
       <div>
         <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">{title}</p>
         <h3 className="text-3xl font-black text-slate-900 dark:text-white">{value}</h3>
@@ -112,6 +120,22 @@ const MetricCard = ({ title, value, icon: Icon, accent }) => (
         <Icon className="w-5 h-5 text-white" />
       </div>
     </div>
+    
+    <div className="relative z-10 flex items-center">
+        <span className="text-xs font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700">
+           Today: {todayValue}
+        </span>
+    </div>
+
+    {sparklineData && sparklineData.length > 0 && (
+      <div className="absolute bottom-0 left-0 right-0 h-16 opacity-30 pointer-events-none">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={sparklineData}>
+            <Line type="monotone" dataKey={dataKey} stroke={sparkColor} strokeWidth={3} dot={false} isAnimationActive={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    )}
   </div>
 );
 
@@ -130,7 +154,7 @@ const Card = ({ title, icon: Icon, children, className = '' }) => (
 // ──────────────────────────────────────────────────────────────────
 // LOGIN COMPONENT
 // ──────────────────────────────────────────────────────────────────
-const LoginScreen = ({ onLogin }) => {
+const LoginScreen = ({ onLogin, supabaseClient }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -144,11 +168,11 @@ const LoginScreen = ({ onLogin }) => {
     setError(''); setInfo(''); setBusy(true);
     try {
       if (mode === 'signin') {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
         if (error) throw error;
         onLogin();
       } else {
-        const { error } = await supabase.auth.signUp({ email, password });
+        const { error } = await supabaseClient.auth.signUp({ email, password });
         if (error) throw error;
         setInfo('Check your email to confirm your account, then sign in.');
         setMode('signin');
@@ -264,6 +288,7 @@ export default function App() {
   // Auth state
   const [session, setSession] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [supabaseClient, setSupabaseClient] = useState(null);
 
   // Theme state
   const [theme, setTheme] = useState(() => {
@@ -301,20 +326,8 @@ export default function App() {
     localStorage.setItem('railmadad_theme', theme);
   }, [theme]);
 
-  // ── Auth
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setAuthChecked(true);
-    });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
-      setSession(s);
-    });
-    return () => sub.subscription.unsubscribe();
-  }, []);
-
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    if (supabaseClient) await supabaseClient.auth.signOut();
     setDbData(initialRawDatabase);
   };
 
@@ -350,9 +363,9 @@ export default function App() {
     setIsLoading(false);
   }, []);
 
-  const fetchCloudData = useCallback(async () => {
+  const fetchCloudData = useCallback(async (client) => {
     try {
-      const { data, error } = await supabase.from('railmadad_sync').select('*').eq('id', 1).single();
+      const { data, error } = await client.from('railmadad_sync').select('*').eq('id', 1).single();
       if (error) { loadLocalFallback(); return; }
       if (data && data.json_data && data.json_data.records) {
         applyDashboardData(data.json_data, new Date(data.last_updated || Date.now()).toLocaleTimeString());
@@ -368,8 +381,67 @@ export default function App() {
   }, [loadLocalFallback]);
 
   useEffect(() => {
-    if (session) fetchCloudData();
-  }, [session, fetchCloudData]);
+    const loadDependencies = async () => {
+      try {
+        if (!window.XLSX) {
+          await new Promise((res) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+            script.onload = res;
+            document.head.appendChild(script);
+          });
+        }
+        if (!window.supabase) {
+          await new Promise((res) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+            script.onload = res;
+            document.head.appendChild(script);
+          });
+        }
+        if (!window.jspdf) {
+          await new Promise((res) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+            script.onload = res;
+            document.head.appendChild(script);
+          });
+        }
+        if (!window.jspdf || !window.jspdf.jsPDF.API.autoTable) {
+          await new Promise((res) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js';
+            script.onload = res;
+            document.head.appendChild(script);
+          });
+        }
+        
+        const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        setSupabaseClient(client);
+
+        client.auth.getSession().then(({ data }) => {
+          setSession(data.session);
+          setAuthChecked(true);
+        });
+        
+        client.auth.onAuthStateChange((_event, s) => {
+          setSession(s);
+        });
+        
+      } catch (err) {
+        console.error("Dependency loading failed", err);
+        loadLocalFallback();
+        setAuthChecked(true); // Ensure UI loads even if scripts fail
+      }
+    };
+    loadDependencies();
+  }, [loadLocalFallback]);
+
+  useEffect(() => {
+    if (session && supabaseClient) {
+      fetchCloudData(supabaseClient);
+    }
+  }, [session, supabaseClient, fetchCloudData]);
 
   // ── CORE AGGREGATOR
   const aggregated = useMemo(() => {
@@ -408,7 +480,12 @@ export default function App() {
       return true;
     });
 
+    const targetToday = filters.toDate; // Use the end date filter as 'Today'
     const kpis = { total: validRecords.length, bedroll: 0, clean: 0, water: 0, maint: 0 };
+    const kpisToday = { total: 0, bedroll: 0, clean: 0, water: 0, maint: 0 };
+    
+    const dailySparkMap = new Map(); // { 'YYYY-MM-DD': { total: 0, bedroll: 0... } }
+    
     const trainCatMap = new Map();
     const zoneDivMap = new Map();
     const shiftCatMap = new Map();
@@ -427,30 +504,57 @@ export default function App() {
     const uniqueDivs = new Set();
     const scatterData = [];
 
-    // Trends maps
+    // Trend mapping
     const dailyMap = new Map();
     const weeklyMap = new Map();
     const monthlyMap = new Map();
     const categoryTrendMap = new Map();
     const slaTrendMap = new Map();
+    
+    // Heatmap Max Values
+    let maxZoneDivValue = 0;
+    let maxTrainCatValue = 0;
 
     validRecords.forEach((r) => {
       const catLow = String(r.category).toLowerCase();
-      if (catLow.includes('bedroll') || catLow.includes('linen')) kpis.bedroll++;
-      if (catLow.includes('clean') || catLow.includes('dirt')) kpis.clean++;
-      if (catLow.includes('water') || catLow.includes('plumb')) kpis.water++;
-      if (catLow.includes('maintain') || catLow.includes('coach') || catLow.includes('equip')) kpis.maint++;
+      const isToday = r.date === targetToday;
+
+      // Init sparkline map for this date
+      if (!dailySparkMap.has(r.date)) dailySparkMap.set(r.date, { date: r.date, total: 0, bedroll: 0, clean: 0, water: 0, maint: 0 });
+      const sparkObj = dailySparkMap.get(r.date);
+      sparkObj.total++;
+      if (isToday) kpisToday.total++;
+
+      // Global & Daily KPI Counting
+      if (catLow.includes('bedroll') || catLow.includes('linen')) { 
+          kpis.bedroll++; sparkObj.bedroll++; if(isToday) kpisToday.bedroll++; 
+      }
+      if (catLow.includes('clean') || catLow.includes('dirt')) { 
+          kpis.clean++; sparkObj.clean++; if(isToday) kpisToday.clean++; 
+      }
+      if (catLow.includes('water') || catLow.includes('plumb')) { 
+          kpis.water++; sparkObj.water++; if(isToday) kpisToday.water++; 
+      }
+      if (catLow.includes('maintain') || catLow.includes('coach') || catLow.includes('equip')) { 
+          kpis.maint++; sparkObj.maint++; if(isToday) kpisToday.maint++; 
+      }
 
       uniqueCats.add(String(r.category));
 
+      // Train Matrix (with max value tracking for Heatmap)
       if (!trainCatMap.has(r.train)) trainCatMap.set(r.train, { train: r.train, Total: 0 });
       const tObj = trainCatMap.get(r.train);
-      tObj.Total++; tObj[r.category] = (tObj[r.category] || 0) + 1;
+      tObj.Total++; 
+      tObj[r.category] = (tObj[r.category] || 0) + 1;
+      if (tObj[r.category] > maxTrainCatValue) maxTrainCatValue = tObj[r.category];
 
+      // Zone Correlation Matrix (with max value tracking for Heatmap)
       uniqueDivs.add(String(r.div));
       if (!zoneDivMap.has(r.ownZone)) zoneDivMap.set(r.ownZone, { zone: r.ownZone, Total: 0 });
       const zObj = zoneDivMap.get(r.ownZone);
-      zObj.Total++; zObj[r.div] = (zObj[r.div] || 0) + 1;
+      zObj.Total++; 
+      zObj[r.div] = (zObj[r.div] || 0) + 1;
+      if (zObj[r.div] > maxZoneDivValue) maxZoneDivValue = zObj[r.div];
 
       if (!shiftCatMap.has(r.shift2)) shiftCatMap.set(r.shift2, { shift: r.shift2, Total: 0 });
       const sObj = shiftCatMap.get(r.shift2);
@@ -491,7 +595,7 @@ export default function App() {
         if (w.length > 3 && !STOP_WORDS.has(w)) wordMap.set(w, (wordMap.get(w) || 0) + 1);
       });
 
-      // Trends
+      // Trends Tab
       const dKey = r.date;
       const wKey = getWeekKey(r.date);
       const mKey = r.month;
@@ -499,12 +603,10 @@ export default function App() {
       weeklyMap.set(wKey, (weeklyMap.get(wKey) || 0) + 1);
       monthlyMap.set(mKey, (monthlyMap.get(mKey) || 0) + 1);
 
-      // Category trend (top categories by date)
       if (!categoryTrendMap.has(dKey)) categoryTrendMap.set(dKey, { date: dKey });
       const ctObj = categoryTrendMap.get(dKey);
       ctObj[r.category] = (ctObj[r.category] || 0) + 1;
 
-      // SLA trend
       if (!slaTrendMap.has(dKey)) slaTrendMap.set(dKey, { date: dKey, OnTime: 0, Breached: 0 });
       const slaObj = slaTrendMap.get(dKey);
       if (String(r.sla).toLowerCase().includes('breach') || String(r.sla).toLowerCase().includes('miss')) {
@@ -516,8 +618,14 @@ export default function App() {
 
     const uniqueCatsArray = Array.from(uniqueCats).sort();
     const uniqueDivsArray = Array.from(uniqueDivs).sort();
+    
+    // Sort tables by volume
     const trainMatrix = Array.from(trainCatMap.values()).sort((a, b) => b.Total - a.Total);
-    const zoneDivBar = Array.from(zoneDivMap.values()).sort((a, b) => b.Total - a.Total);
+    const zoneDivMatrix = Array.from(zoneDivMap.values()).sort((a, b) => b.Total - a.Total);
+    
+    // Convert sparkline map to sorted array
+    const sparklineArray = Array.from(dailySparkMap.values()).sort((a,b) => a.date.localeCompare(b.date));
+
     const shiftHeatmap = Array.from(shiftCatMap.values()).sort((a, b) => String(a.shift).localeCompare(String(b.shift)));
     const resSpeedBar = Array.from(catResMap.values())
       .map((c) => ({ category: String(c.category), avgMins: Math.round(c.sum / c.count) }))
@@ -543,14 +651,13 @@ export default function App() {
       .map(([key, count]) => ({ key, count }))
       .sort((a, b) => a.key.localeCompare(b.key));
 
-    // Top categories trend (top 5 categories, by date)
     const topCats = Array.from(catResMap.keys()).slice(0, 5);
     const categoryTrend = Array.from(categoryTrendMap.values()).sort((a, b) => a.date.localeCompare(b.date));
     const slaTrend = Array.from(slaTrendMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 
     return {
-      kpis, options: opt,
-      trainMatrix, zoneDivBar, uniqueDivsArray, shiftHeatmap, scatterData, resSpeedBar,
+      kpis, kpisToday, sparklineArray, maxZoneDivValue, maxTrainCatValue, options: opt,
+      trainMatrix, zoneDivMatrix, uniqueDivsArray, shiftHeatmap, scatterData, resSpeedBar,
       wateringList, pestDefectTable, coachMatrix, unsatTable, quickCloseData, wordCloud,
       uniqueCatsArray, validRecords,
       dailyTrend, weeklyTrend, monthlyTrend, categoryTrend, topCats, slaTrend
@@ -558,7 +665,7 @@ export default function App() {
   }, [dbData, filters]);
 
   const {
-    kpis, options, trainMatrix, zoneDivBar, uniqueDivsArray, shiftHeatmap, scatterData, resSpeedBar,
+    kpis, kpisToday, sparklineArray, maxZoneDivValue, maxTrainCatValue, options, trainMatrix, zoneDivMatrix, uniqueDivsArray, shiftHeatmap, scatterData, resSpeedBar,
     wateringList, pestDefectTable, coachMatrix, unsatTable, quickCloseData, wordCloud,
     uniqueCatsArray, validRecords,
     dailyTrend, weeklyTrend, monthlyTrend, categoryTrend, topCats, slaTrend
@@ -574,9 +681,9 @@ export default function App() {
     reader.onload = async (evt) => {
       try {
         const buffer = evt.target.result;
-        const workbook = XLSX.read(buffer, { type: 'array' });
+        const workbook = window.XLSX.read(buffer, { type: 'array' });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rawArray = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+        const rawArray = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
 
         if (!rawArray || rawArray.length === 0) throw new Error('File is empty.');
 
@@ -672,13 +779,15 @@ export default function App() {
           localStorage.setItem('railmadad_local_sync', JSON.stringify(newData));
           showToast(`Appended ${newRecordsAdded} new records.`);
 
-          try {
-            const { error } = await supabase.from('railmadad_sync').upsert(
-              { id: 1, json_data: newData, last_updated: new Date().toISOString() },
-              { onConflict: 'id' }
-            );
-            if (!error) setLastSync(new Date().toLocaleTimeString() + ' (Cloud Synced)');
-          } catch { console.warn('Cloud save issue'); }
+          if (supabaseClient) {
+            try {
+              const { error } = await supabaseClient.from('railmadad_sync').upsert(
+                { id: 1, json_data: newData, last_updated: new Date().toISOString() },
+                { onConflict: 'id' }
+              );
+              if (!error) setLastSync(new Date().toLocaleTimeString() + ' (Cloud Synced)');
+            } catch { console.warn('Cloud save issue'); }
+          }
         } else {
           showToast('No new records detected.');
         }
@@ -697,12 +806,14 @@ export default function App() {
     showToast('Wiping database...');
     applyDashboardData(initialRawDatabase, 'Wiped Clean');
     localStorage.removeItem('railmadad_local_sync');
-    try {
-      await supabase.from('railmadad_sync').upsert(
-        { id: 1, json_data: initialRawDatabase, last_updated: new Date().toISOString() },
-        { onConflict: 'id' }
-      );
-    } catch { /* no-op */ }
+    if (supabaseClient) {
+      try {
+        await supabaseClient.from('railmadad_sync').upsert(
+          { id: 1, json_data: initialRawDatabase, last_updated: new Date().toISOString() },
+          { onConflict: 'id' }
+        );
+      } catch { /* no-op */ }
+    }
   };
 
   // ── EXPORT FUNCTIONS
@@ -744,17 +855,17 @@ export default function App() {
     setShowExportMenu(false);
     if (!validRecords.length) { showToast('Nothing to export.'); return; }
     const rows = buildExportRows();
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Records');
-    XLSX.writeFile(wb, `railmadad_export_${todayStr}.xlsx`);
+    const ws = window.XLSX.utils.json_to_sheet(rows);
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, ws, 'Records');
+    window.XLSX.writeFile(wb, `railmadad_export_${todayStr}.xlsx`);
     showToast(`Exported ${rows.length} rows as Excel.`);
   };
 
   const exportPDF = () => {
     setShowExportMenu(false);
     if (!validRecords.length) { showToast('Nothing to export.'); return; }
-    const doc = new jsPDF({ orientation: 'landscape' });
+    const doc = new window.jspdf.jsPDF({ orientation: 'landscape' });
     doc.setFontSize(14);
     doc.text('RailMadad Dashboard — Filtered Export', 14, 14);
     doc.setFontSize(9);
@@ -765,7 +876,7 @@ export default function App() {
     const body = validRecords.slice(0, 1000).map((r) => [
       r.id, r.date, r.train, r.category, `${r.coachType}-${r.coachNo}`, r.status, r.sla, r.rating
     ]);
-    autoTable(doc, {
+    doc.autoTable({
       head: [headers], body, startY: 30,
       styles: { fontSize: 7, cellPadding: 2 },
       headStyles: { fillColor: [99, 102, 241], textColor: 255, fontStyle: 'bold' },
@@ -778,7 +889,7 @@ export default function App() {
   // ──────────────────────────────────────────────────────────────────
   // RENDER GATES
   // ──────────────────────────────────────────────────────────────────
-  if (!authChecked) {
+  if (!authChecked || !supabaseClient) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
         <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
@@ -787,7 +898,7 @@ export default function App() {
   }
 
   if (!session) {
-    return <LoginScreen onLogin={() => { /* auth listener will handle */ }} />;
+    return <LoginScreen onLogin={() => { /* auth listener will handle */ }} supabaseClient={supabaseClient} />;
   }
 
   if (isLoading) {
@@ -1041,40 +1152,79 @@ export default function App() {
             </div>
           ) : (
             <>
-              {/* TAB: EXECUTIVE OVERVIEW */}
+              {/* TAB 1: EXECUTIVE OVERVIEW */}
               {activeTab === 'executive' && (
                 <div className="space-y-8 animate-fade-in">
+                  
+                  {/* KPI TILES (WITH DUAL METRICS & SPARKLINES) */}
                   <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-6">
-                    <MetricCard title="Total Volume" value={kpis.total} icon={LayoutDashboard} accent="bg-indigo-600" />
-                    <MetricCard title="Bedroll" value={kpis.bedroll} icon={Sparkles} accent="bg-purple-600" />
-                    <MetricCard title="Cleanliness" value={kpis.clean} icon={Sparkles} accent="bg-emerald-600" />
-                    <MetricCard title="Watering" value={kpis.water} icon={Sparkles} accent="bg-sky-600" />
-                    <MetricCard title="Maintenance" value={kpis.maint} icon={Sparkles} accent="bg-amber-600" />
+                    <MetricCard 
+                       title="Total Volume" value={kpis.total} todayValue={kpisToday.total} icon={LayoutDashboard} 
+                       accent="bg-indigo-600" sparkColor="#4f46e5" sparklineData={sparklineArray} dataKey="total" 
+                    />
+                    <MetricCard 
+                       title="Bedroll" value={kpis.bedroll} todayValue={kpisToday.bedroll} icon={Sparkles} 
+                       accent="bg-purple-600" sparkColor="#9333ea" sparklineData={sparklineArray} dataKey="bedroll" 
+                    />
+                    <MetricCard 
+                       title="Cleanliness" value={kpis.clean} todayValue={kpisToday.clean} icon={Sparkles} 
+                       accent="bg-emerald-600" sparkColor="#10b981" sparklineData={sparklineArray} dataKey="clean" 
+                    />
+                    <MetricCard 
+                       title="Watering" value={kpis.water} todayValue={kpisToday.water} icon={Sparkles} 
+                       accent="bg-sky-600" sparkColor="#0284c7" sparklineData={sparklineArray} dataKey="water" 
+                    />
+                    <MetricCard 
+                       title="Maintenance" value={kpis.maint} todayValue={kpisToday.maint} icon={Sparkles} 
+                       accent="bg-amber-600" sparkColor="#d97706" sparklineData={sparklineArray} dataKey="maint" 
+                    />
                   </div>
 
-                  <Card title="Foreign Train Correlation (Coach Owning Zone vs Current Div)" icon={LucideMap}>
-                    <div className="h-[400px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={zoneDivBar} layout="vertical" margin={{ left: 60, right: 20 }}>
-                          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={gridStroke} />
-                          <XAxis type="number" axisLine={false} tickLine={false} tick={axisStyle} />
-                          <YAxis dataKey="zone" type="category" axisLine={false} tickLine={false} tick={axisStyle} dx={-10} />
-                          <Tooltip cursor={{ fill: theme === 'dark' ? '#1e293b' : '#f8fafc' }} />
-                          <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: '12px' }} />
-                          {uniqueDivsArray.map((divName, i) => (
-                            <Bar key={String(divName)} dataKey={String(divName)} stackId="a" fill={COLORS[i % COLORS.length]} />
-                          ))}
-                        </BarChart>
-                      </ResponsiveContainer>
+                  {/* VISUAL 1: FOREIGN TRAIN CORRELATION HEATMAP */}
+                  <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
+                    <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex items-center justify-between">
+                      <h3 className="text-base font-bold text-slate-800 dark:text-white">Foreign Train Correlation (Coach Owning Zone vs Current Div)</h3>
+                      <LucideMap className="text-slate-300 dark:text-slate-600 w-5 h-5"/>
                     </div>
-                  </Card>
+                    <div className="overflow-x-auto max-h-[400px]">
+                      <table className="min-w-full text-left border-collapse text-sm">
+                        <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 z-10 shadow-sm">
+                          <tr className="text-slate-500 dark:text-slate-400 text-[10px] uppercase tracking-widest">
+                            <th className="p-4 font-bold border-b border-slate-200 dark:border-slate-700">Coach Owning Zone</th>
+                            {uniqueDivsArray.map((div) => (
+                              <th key={String(div)} className="p-4 font-bold border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">{div}</th>
+                            ))}
+                            <th className="p-4 font-black border-b border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-slate-700 dark:text-slate-300 divide-y divide-slate-100 dark:divide-slate-800">
+                          {zoneDivMatrix.map((row, idx) => (
+                            <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
+                              <td className="p-4 font-bold whitespace-nowrap">{row.zone}</td>
+                              {uniqueDivsArray.map((div) => {
+                                const val = row[div] || 0;
+                                const { bg, text } = getHeatmapColor(val, maxZoneDivValue, 'blue');
+                                return (
+                                  <td key={String(div)} style={{ backgroundColor: bg, color: text }} className="p-4 font-medium transition-colors">
+                                    {val || '-'}
+                                  </td>
+                                );
+                              })}
+                              <td className="p-4 font-black text-indigo-600 dark:text-indigo-400">{row.Total}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
 
+                  {/* VISUAL 2: MAJOR COMPLAINT GIVING TRAINS MATRIX */}
                   <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
                     <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60">
                       <h3 className="text-base font-bold text-slate-800 dark:text-white">Major Complaint Giving Trains</h3>
                     </div>
                     <div className="overflow-x-auto max-h-[600px]">
-                      <table className="min-w-full text-left border-collapse">
+                      <table className="min-w-full text-left border-collapse text-sm">
                         <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 z-10 shadow-sm">
                           <tr className="text-slate-500 dark:text-slate-400 text-[10px] uppercase tracking-widest">
                             <th className="p-4 font-bold border-b border-slate-200 dark:border-slate-700">Train</th>
@@ -1084,15 +1234,21 @@ export default function App() {
                             <th className="p-4 font-black border-b border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white">Total</th>
                           </tr>
                         </thead>
-                        <tbody className="text-sm text-slate-700 dark:text-slate-300 divide-y divide-slate-100 dark:divide-slate-800">
+                        <tbody className="text-slate-700 dark:text-slate-300 divide-y divide-slate-100 dark:divide-slate-800">
                           {trainMatrix.slice(0, 50).map((row, idx) => (
                             <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
                               <td className="p-4 font-bold flex items-center text-slate-900 dark:text-white whitespace-nowrap">
                                 <TrainFront className="w-4 h-4 mr-2 text-indigo-400" />{row.train}
                               </td>
-                              {uniqueCatsArray.map((c) => (
-                                <td key={String(c)} className="p-4 font-medium text-slate-600 dark:text-slate-400">{row[c] || '-'}</td>
-                              ))}
+                              {uniqueCatsArray.map((c) => {
+                                const val = row[c] || 0;
+                                const { bg, text } = getHeatmapColor(val, maxTrainCatValue, 'red');
+                                return (
+                                  <td key={String(c)} style={{ backgroundColor: bg, color: text }} className="p-4 font-medium transition-colors">
+                                    {val || '-'}
+                                  </td>
+                                );
+                              })}
                               <td className="p-4 font-black text-indigo-600 dark:text-indigo-400">{row.Total}</td>
                             </tr>
                           ))}
@@ -1100,6 +1256,7 @@ export default function App() {
                       </table>
                     </div>
                   </div>
+
                 </div>
               )}
 
