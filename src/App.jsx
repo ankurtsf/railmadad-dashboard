@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  ScatterChart, Scatter, ZAxis
+  ScatterChart, Scatter, ZAxis, ReferenceLine, LabelList
 } from 'recharts';
 import {
   LayoutDashboard, TrainFront, Clock, MessageSquareWarning,
@@ -514,6 +514,7 @@ export default function App() {
     // Heatmap Max Values
     let maxZoneDivValue = 0;
     let maxTrainCatValue = 0;
+    let maxShiftVal = 0;
 
     validRecords.forEach((r) => {
       const catLow = String(r.category).toLowerCase();
@@ -558,7 +559,9 @@ export default function App() {
 
       if (!shiftCatMap.has(r.shift2)) shiftCatMap.set(r.shift2, { shift: r.shift2, Total: 0 });
       const sObj = shiftCatMap.get(r.shift2);
-      sObj.Total++; sObj[r.category] = (sObj[r.category] || 0) + 1;
+      sObj.Total++; 
+      sObj[r.category] = (sObj[r.category] || 0) + 1;
+      if (sObj[r.category] > maxShiftVal) maxShiftVal = sObj[r.category];
 
       if (r.resTimeMins > 0) {
         scatterData.push({ category: r.category, time: r.resTimeMins, name: r.id });
@@ -627,9 +630,12 @@ export default function App() {
     const sparklineArray = Array.from(dailySparkMap.values()).sort((a,b) => a.date.localeCompare(b.date));
 
     const shiftHeatmap = Array.from(shiftCatMap.values()).sort((a, b) => String(a.shift).localeCompare(String(b.shift)));
+    
+    // Sorted ascending so highest average minute categories appear at the TOP of the Recharts vertical BarChart
     const resSpeedBar = Array.from(catResMap.values())
       .map((c) => ({ category: String(c.category), avgMins: Math.round(c.sum / c.count) }))
-      .sort((a, b) => b.avgMins - a.avgMins);
+      .sort((a, b) => a.avgMins - b.avgMins); 
+      
     const wateringList = Array.from(wateringMap.entries())
       .map(([station, count]) => ({ station: String(station), count }))
       .sort((a, b) => b.count - a.count).slice(0, 15);
@@ -656,7 +662,7 @@ export default function App() {
     const slaTrend = Array.from(slaTrendMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 
     return {
-      kpis, kpisToday, sparklineArray, maxZoneDivValue, maxTrainCatValue, options: opt,
+      kpis, kpisToday, sparklineArray, maxZoneDivValue, maxTrainCatValue, maxShiftVal, options: opt,
       trainMatrix, zoneDivMatrix, uniqueDivsArray, shiftHeatmap, scatterData, resSpeedBar,
       wateringList, pestDefectTable, coachMatrix, unsatTable, quickCloseData, wordCloud,
       uniqueCatsArray, validRecords,
@@ -665,7 +671,7 @@ export default function App() {
   }, [dbData, filters]);
 
   const {
-    kpis, kpisToday, sparklineArray, maxZoneDivValue, maxTrainCatValue, options, trainMatrix, zoneDivMatrix, uniqueDivsArray, shiftHeatmap, scatterData, resSpeedBar,
+    kpis, kpisToday, sparklineArray, maxZoneDivValue, maxTrainCatValue, maxShiftVal, options, trainMatrix, zoneDivMatrix, uniqueDivsArray, shiftHeatmap, scatterData, resSpeedBar,
     wateringList, pestDefectTable, coachMatrix, unsatTable, quickCloseData, wordCloud,
     uniqueCatsArray, validRecords,
     dailyTrend, weeklyTrend, monthlyTrend, categoryTrend, topCats, slaTrend
@@ -1284,14 +1290,10 @@ export default function App() {
                               </td>
                               {uniqueCatsArray.slice(0, 6).map((c) => {
                                 const val = row[c] || 0;
-                                const heatClass = val > 15
-                                  ? 'bg-rose-100 dark:bg-rose-950/50 text-rose-800 dark:text-rose-300 font-bold'
-                                  : val > 5
-                                    ? 'bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 font-bold'
-                                    : 'text-slate-500 dark:text-slate-400';
+                                const { bg, text } = getHeatmapColor(val, maxShiftVal, 'red');
                                 return (
-                                  <td key={String(c)} className="p-4">
-                                    <span className={`px-2 py-1 rounded ${heatClass}`}>{val}</span>
+                                  <td key={String(c)} style={{ backgroundColor: bg, color: text }} className="p-4 font-medium transition-colors">
+                                    {val || '-'}
                                   </td>
                                 );
                               })}
@@ -1307,13 +1309,18 @@ export default function App() {
                     <Card title="SLA & Resolution Efficiency">
                       <div className="h-[400px]">
                         <ResponsiveContainer width="100%" height="100%">
-                          <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                          <ScatterChart margin={{ top: 20, right: 20, bottom: 40, left: 20 }}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={gridStroke} />
-                            <XAxis type="category" dataKey="category" tick={axisStyle} tickLine={false} axisLine={false} />
+                            <XAxis type="category" dataKey="category" tick={{ ...axisStyle, angle: -45, textAnchor: 'end' }} tickLine={false} axisLine={false} height={60} />
                             <YAxis type="number" dataKey="time" tick={axisStyle} tickLine={false} axisLine={false} />
                             <ZAxis type="category" dataKey="name" />
                             <Tooltip cursor={{ strokeDasharray: '3 3' }} />
-                            <Scatter name="Complaints" data={scatterData} fill="#8b5cf6" opacity={0.6} />
+                            <ReferenceLine y={30} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: '30m Target', fill: '#ef4444', fontSize: 12, fontWeight: 'bold' }} />
+                            <Scatter name="Complaints" data={scatterData}>
+                              {scatterData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.time > 30 ? '#ef4444' : '#10b981'} opacity={0.6} />
+                              ))}
+                            </Scatter>
                           </ScatterChart>
                         </ResponsiveContainer>
                       </div>
@@ -1322,12 +1329,14 @@ export default function App() {
                     <Card title="Avg Resolution Speed by Category (Mins)">
                       <div className="h-[400px]">
                         <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={resSpeedBar} layout="vertical" margin={{ left: 80, right: 20 }}>
+                          <BarChart data={resSpeedBar} layout="vertical" margin={{ left: 80, right: 60 }}>
                             <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={gridStroke} />
                             <XAxis type="number" axisLine={false} tickLine={false} tick={axisStyle} />
                             <YAxis dataKey="category" type="category" axisLine={false} tickLine={false} tick={axisStyle} dx={-10} />
                             <Tooltip cursor={{ fill: theme === 'dark' ? '#1e293b' : '#f8fafc' }} />
-                            <Bar dataKey="avgMins" name="Avg Mins" fill="#0ea5e9" radius={[0, 4, 4, 0]} barSize={20} />
+                            <Bar dataKey="avgMins" name="Avg Mins" fill="#0ea5e9" radius={[0, 4, 4, 0]} barSize={20}>
+                              <LabelList dataKey="avgMins" position="right" style={{ fontSize: '11px', fill: theme === 'dark' ? '#94a3b8' : '#64748b' }} formatter={(val) => `${val} mins`} />
+                            </Bar>
                           </BarChart>
                         </ResponsiveContainer>
                       </div>
