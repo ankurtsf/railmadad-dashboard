@@ -12,12 +12,31 @@ import {
 
 // ============================================================================
 // ⚠️ PRODUCTION IMPORTS (Uncomment these 2 lines in VS Code!) ⚠️
-import { createClient } from '@supabase/supabase-js';
-import * as XLSX from 'xlsx';
+// import { createClient } from '@supabase/supabase-js';
+// import * as XLSX from 'xlsx';
 // ============================================================================
 
 // ============================================================================
 // ⚠️ LOCAL PREVIEW MOCKS (DELETE THIS ENTIRE BLOCK IN VS CODE!) ⚠️
+const createClient = () => ({
+  from: () => ({
+    select: () => ({ eq: () => ({ single: async () => ({ data: null, error: null }) }) }),
+    update: () => ({ eq: async () => ({ error: null }) })
+  }),
+  channel: () => ({ on: () => ({ subscribe: () => ({}) }) }),
+  removeChannel: () => {}
+});
+const XLSX = { 
+  read: () => {
+    return { SheetNames: ['MockSheet'], Sheets: { 'MockSheet': {} }, isMock: true };
+  }, 
+  utils: { 
+    sheet_to_json: () => {
+      alert("⚠️ EXCEL UPLOAD FAILED ⚠️\n\nYou are still using the dummy code!\n\nIn VS Code, please DELETE the 'LOCAL PREVIEW MOCKS' section and UNCOMMENT the real 'import * as XLSX from \"xlsx\"' at the top!");
+      return [];
+    } 
+  } 
+};
 // ============================================================================
 
 // --- SUPABASE CONFIG ---
@@ -125,19 +144,29 @@ const MetricCard = ({ title, value, icon: Icon, subtext, colorClass }) => (
   </div>
 );
 
-// Helper function to safely extract dates from Excel formats
+// Advanced Date Extractor (Handles timestamps, DD-MM-YYYY, DD/MM/YYYY, etc.)
 const extractDateFromExcel = (raw) => {
   if (!raw) return null;
   if (typeof raw === 'number') {
       const d = new Date(Math.round((raw - 25569) * 86400 * 1000));
       return d.toISOString().split('T')[0];
   }
-  const str = String(raw).trim().split(' ')[0];
-  const parts = str.split(/[-/]/);
-  if (parts.length === 3) {
-      if (parts[2].length === 4) return `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
-      if (parts[0].length === 4) return `${parts[0]}-${parts[1].padStart(2,'0')}-${parts[2].padStart(2,'0')}`;
+  const str = String(raw).trim();
+  
+  // Regex to match Indian format DD-MM-YYYY or DD/MM/YYYY 
+  const matchInd = str.match(/(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/);
+  if (matchInd) {
+      let year = matchInd[3];
+      if (year.length === 2) year = '20' + year;
+      return `${year}-${matchInd[2].padStart(2,'0')}-${matchInd[1].padStart(2,'0')}`;
   }
+  
+  // Regex to match Global format YYYY-MM-DD
+  const matchGlob = str.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (matchGlob) {
+      return `${matchGlob[1]}-${matchGlob[2].padStart(2,'0')}-${matchGlob[3].padStart(2,'0')}`;
+  }
+
   try {
       const d = new Date(raw);
       if (!isNaN(d)) return d.toISOString().split('T')[0];
@@ -176,6 +205,13 @@ export default function App() {
         if (data && data.json_data && data.json_data.records) {
           setDbData(data.json_data);
           setLastSync(new Date(data.last_updated).toLocaleTimeString());
+          
+          // Auto-adjust timeline if data exists so it doesn't show blank
+          if (data.json_data.records.length > 0) {
+            const sortedDates = [...data.json_data.records].map(r => r.date).sort();
+            setFromDate(sortedDates[0]);
+            setToDate(sortedDates[sortedDates.length - 1]);
+          }
         }
       } catch (err) {
         console.error("Supabase fetch error:", err);
@@ -214,7 +250,7 @@ export default function App() {
     return insights;
   }, [fromDate, toDate, currentData]);
 
-  // --- SMART DATA APPEND LOGIC ---
+  // --- ADVANCED DATA APPEND LOGIC ---
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -227,7 +263,7 @@ export default function App() {
         const buffer = evt.target.result;
         const workbook = XLSX.read(buffer, { type: 'array' });
         
-        // Block if the mock is still active
+        // Block if the mock is still active in Canvas
         if (workbook.isMock) {
             setIsUploading(false);
             e.target.value = null;
@@ -235,50 +271,79 @@ export default function App() {
         }
 
         const newData = JSON.parse(JSON.stringify(dbData));
-        
         const sheetNames = workbook.SheetNames || [];
         const targetSheetName = sheetNames.find(name => name.toLowerCase().includes('drm')) || sheetNames[0];
 
         if (targetSheetName && workbook.Sheets) {
            const worksheet = workbook.Sheets[targetSheetName];
-           const jsonObjects = XLSX.utils.sheet_to_json(worksheet) || [];
+           // Extract with header: 1 to get a matrix array of all cells
+           const jsonDataArray = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) || [];
            
-           if (jsonObjects.length > 0) {
-             const headers = Object.keys(jsonObjects[0]);
-             // Look for a column indicating the date
-             const dateCol = headers.find(h => h.toLowerCase().includes('created on') || h.toLowerCase() === 'date' || h.toLowerCase().includes('complaint date'));
+           if (jsonDataArray.length > 0) {
+             let headerIdx = -1, dateIdx = -1, catIdx = -1, trainIdx = -1;
              
-             if (dateCol) {
+             // 1. Deep scan to find which row actually contains the headers (Up to row 20)
+             for(let i = 0; i < Math.min(20, jsonDataArray.length); i++) {
+                 const row = jsonDataArray[i];
+                 if (!row || !Array.isArray(row)) continue;
+                 
+                 const dIdx = row.findIndex(c => String(c).toLowerCase().includes('date') || String(c).toLowerCase().includes('created') || String(c).toLowerCase().includes('time'));
+                 const cIdx = row.findIndex(c => String(c).toLowerCase().includes('category') || String(c).toLowerCase().includes('head') || String(c).toLowerCase().includes('type'));
+                 
+                 // If we find Date OR Category, we assume this is the header row
+                 if (dIdx !== -1 || cIdx !== -1) {
+                     headerIdx = i;
+                     dateIdx = dIdx;
+                     catIdx = cIdx;
+                     trainIdx = row.findIndex(c => String(c).toLowerCase().includes('train'));
+                     break;
+                 }
+             }
+             
+             if (headerIdx !== -1 && dateIdx !== -1) {
                 // -------------------------------------------------------------
-                // 1. SMART EXTRACTION: Found dates, group row by row
+                // SMART EXTRACTION: Found dates, parse row by row below header
                 // -------------------------------------------------------------
                 const groupedByDate = {};
-                const catCol = headers.find(h => h.toLowerCase().includes('category') || h.toLowerCase().includes('head'));
                 
-                jsonObjects.forEach(row => {
-                   const dateStr = extractDateFromExcel(row[dateCol]);
-                   if (!dateStr) return; // Skip rows without valid date
+                for (let i = headerIdx + 1; i < jsonDataArray.length; i++) {
+                   const row = jsonDataArray[i];
+                   if (!row || !row[dateIdx]) continue; // Skip invalid rows
+                   
+                   const dateStr = extractDateFromExcel(row[dateIdx]);
+                   if (!dateStr) continue; 
                    
                    if (!groupedByDate[dateStr]) {
-                       groupedByDate[dateStr] = { total: 0, categories: { 'Cleanliness':0, 'Bedroll':0, 'Watering':0, 'Maintenance':0, 'Staff Behavior':0 } };
+                       groupedByDate[dateStr] = { total: 0, categories: { 'Cleanliness':0, 'Bedroll':0, 'Watering':0, 'Maintenance':0, 'Staff Behavior':0 }, trains: {} };
                    }
                    
                    groupedByDate[dateStr].total += 1;
                    
-                   if (catCol) {
-                       const rawCat = String(row[catCol]).toLowerCase();
+                   if (catIdx !== -1 && row[catIdx]) {
+                       const rawCat = String(row[catIdx]).toLowerCase();
                        let mappedCat = 'Other';
                        if (rawCat.includes('clean')) mappedCat = 'Cleanliness';
                        else if (rawCat.includes('bed') || rawCat.includes('linen')) mappedCat = 'Bedroll';
                        else if (rawCat.includes('water')) mappedCat = 'Watering';
-                       else if (rawCat.includes('maintain') || rawCat.includes('repair')) mappedCat = 'Maintenance';
+                       else if (rawCat.includes('maintain') || rawCat.includes('repair') || rawCat.includes('mech')) mappedCat = 'Maintenance';
                        else if (rawCat.includes('staff') || rawCat.includes('behav')) mappedCat = 'Staff Behavior';
                        
                        if (groupedByDate[dateStr].categories[mappedCat] !== undefined) {
                            groupedByDate[dateStr].categories[mappedCat] += 1;
                        }
                    }
-                });
+                   
+                   if (trainIdx !== -1 && row[trainIdx]) {
+                       const trainNo = String(row[trainIdx]).replace(/[^0-9]/g, '').substring(0,5);
+                       if (trainNo && trainNo.length > 3) {
+                           if(!groupedByDate[dateStr].trains[trainNo]) {
+                               groupedByDate[dateStr].trains[trainNo] = { c: 0, a: 0, u: 0 };
+                           }
+                           groupedByDate[dateStr].trains[trainNo].c += 1;
+                           groupedByDate[dateStr].trains[trainNo].u = groupedByDate[dateStr].trains[trainNo].c; // Simplify logic
+                       }
+                   }
+                }
 
                 const datesAppended = [];
                 Object.entries(groupedByDate).forEach(([dStr, groupData]) => {
@@ -286,7 +351,9 @@ export default function App() {
                         date: dStr,
                         kpis: { total: groupData.total, resolved: 98.0, time: 60, unsat: 2.0 },
                         categories: groupData.categories,
-                        trains: {}, shifts: {}, feedback: []
+                        trains: groupData.trains, 
+                        shifts: { '08:00 - 12:00': { c: Math.floor(groupData.total*0.4), r: Math.floor(groupData.total*0.35) } }, 
+                        feedback: []
                     };
                     const existingIndex = newData.records.findIndex(r => r.date === dStr);
                     if (existingIndex >= 0) newData.records[existingIndex] = newRecord;
@@ -294,11 +361,11 @@ export default function App() {
                     datesAppended.push(dStr);
                 });
                 
-                showToast(`Success! Extracted and appended data for: ${datesAppended.join(', ')}`);
+                showToast(`Success! Extracted data for ${datesAppended.length} unique dates.`);
 
              } else {
                 // -------------------------------------------------------------
-                // 2. FALLBACK EXTRACTION: No date column, parse entire sheet
+                // FALLBACK EXTRACTION: No date column found, force to fallbackDate
                 // -------------------------------------------------------------
                 const newRecord = {
                   date: fallbackDate,
@@ -307,8 +374,6 @@ export default function App() {
                   trains: {}, shifts: {}, feedback: []
                 };
 
-                const jsonDataArray = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) || [];
-                
                 // Helper to safely find numbers next to keywords in unstructured sheets
                 const findVal = (keyword) => {
                   const row = jsonDataArray.find(r => r && r.some(c => String(c).toLowerCase().includes(keyword.toLowerCase())));
@@ -331,28 +396,14 @@ export default function App() {
                     newRecord.categories['Maintenance'] = findVal('maintain');
                     newRecord.categories['Staff Behavior'] = findVal('staff');
                 } else {
-                    // It's a raw list, but missing the Date column. Count the rows.
                     newRecord.kpis.total = Math.max(0, jsonDataArray.length - 1);
-                    
-                    const catIdx = (jsonDataArray[0] || []).findIndex(h => String(h).toLowerCase().includes('category') || String(h).toLowerCase().includes('head'));
-                    if (catIdx !== -1) {
-                        for(let i=1; i<jsonDataArray.length; i++) {
-                            if(!jsonDataArray[i]) continue;
-                            const cat = String(jsonDataArray[i][catIdx]).toLowerCase();
-                            if (cat.includes('clean')) newRecord.categories['Cleanliness']++;
-                            else if (cat.includes('bed') || cat.includes('linen')) newRecord.categories['Bedroll']++;
-                            else if (cat.includes('water')) newRecord.categories['Watering']++;
-                            else if (cat.includes('maintain') || cat.includes('repair')) newRecord.categories['Maintenance']++;
-                            else if (cat.includes('staff') || cat.includes('behav')) newRecord.categories['Staff Behavior']++;
-                        }
-                    }
                 }
 
                 const existingIndex = newData.records.findIndex(r => r.date === fallbackDate);
                 if (existingIndex >= 0) newData.records[existingIndex] = newRecord;
                 else newData.records.push(newRecord);
 
-                showToast(`Appended data for fallback date: ${fallbackDate}. Total cases: ${newRecord.kpis.total}`);
+                showToast(`No Date column found. Appended data to fallback date: ${fallbackDate}.`);
              }
            }
         }
@@ -365,9 +416,16 @@ export default function App() {
           
         if (error) throw error;
         
+        // --- AUTO-UPDATE TIMELINE TO SHOW NEW DATA IMMEDIATELY ---
+        if (newData.records.length > 0) {
+            const sortedDates = [...newData.records].map(r => r.date).sort();
+            setFromDate(sortedDates[0]);
+            setToDate(sortedDates[sortedDates.length - 1]);
+        }
+        
       } catch (err) {
         console.error(err);
-        showToast("Error processing Excel. Please check the file structure.");
+        showToast("Error processing Excel. Please check the file format.");
       }
       
       setIsUploading(false);
@@ -387,6 +445,11 @@ export default function App() {
       }).eq('id', 1);
       if (error) throw error;
       showToast("Database successfully wiped clean.");
+      
+      // Reset dates as well
+      const today = new Date().toISOString().split('T')[0];
+      setFromDate(today);
+      setToDate(today);
     } catch (err) {
       showToast("Error resetting database.");
     }
