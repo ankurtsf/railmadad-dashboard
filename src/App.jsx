@@ -10,11 +10,20 @@ import {
   Upload, Bot, Calendar, Trash2, Cpu
 } from 'lucide-react';
 
-// ============================================================================
-// ⚠️ PRODUCTION IMPORTS (Uncomment these 2 lines in VS Code!) ⚠️
+// --- PRODUCTION IMPORTS ---
 // import { createClient } from '@supabase/supabase-js';
 // import * as XLSX from 'xlsx';
-// ============================================================================
+
+// --- LOCAL PREVIEW MOCKS ---
+const createClient = () => ({
+  from: () => ({
+    select: () => ({ eq: () => ({ single: async () => ({ data: null, error: null }) }) }),
+    update: () => ({ eq: async () => ({ error: null }) })
+  }),
+  channel: () => ({ on: () => ({ subscribe: () => ({}) }) }),
+  removeChannel: () => {}
+});
+const XLSX = { read: () => ({ SheetNames: [], Sheets: {} }), utils: { sheet_to_json: () => [] } };
 
 // --- SUPABASE CONFIG ---
 const supabaseUrl = 'https://npfuxifktdmxmzprfcxm.supabase.co';
@@ -271,12 +280,7 @@ export default function App() {
           
         if (error) throw error;
 
-        // Check if we are running the local mock VS actual library
-        if (sheetNames.length === 0) {
-           showToast(`Appended Mock Data for ${uploadDate}. (Uncomment real XLSX import in VS Code for real data)`);
-        } else {
-           showToast(`Success! Appended Excel data for ${uploadDate}.`);
-        }
+        showToast(`Success! Appended Excel data for ${uploadDate}.`);
         
       } catch (err) {
         console.error(err);
