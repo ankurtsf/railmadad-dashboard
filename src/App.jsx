@@ -9,66 +9,66 @@ import {
   Calendar, Trash2, Cpu, FileSpreadsheet, Bug, BarChart3
 } from 'lucide-react';
 
-import { createClient } from '@supabase/supabase-js';
-import * as XLSX from 'xlsx';
-
-// --- SUPABASE CONFIG ---
-const supabaseUrl = 'https://npfuxifktdmxmzprfcxm.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZnV4aWZrdGRteG16cHJmY3htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2MjMwMDMsImV4cCI6MjA5NDE5OTAwM30.cCheIUxTAQWyoVyIwOLRd5usiyFI-q2GIn3A9NPFL78';
-const supabase = createClient(supabaseUrl, supabaseKey);
-
-const COLORS = ['#3b82f6', '#8b5cf6', '#0ea5e9', '#f59e0b', '#ef4444', '#10b981', '#6366f1', '#f43f5e'];
+const COLORS = ['#3b82f6', '#8b5cf6', '#0ea5e9', '#f59e0b', '#ef4444', '#10b981', '#6366f1', '#f43f5e', '#a855f7', '#ec4899'];
 
 // Strictly empty initial state. No placeholder data.
 const initialRawDatabase = { records: [] };
 
 // --- STRICT RAW DATA PARSERS ---
 
-// Parses RailMadad specific Date Format: "22-05-25 22:51" or "22-02-25 00:06"
+// Parses exact RailMadad Date Format: "22-05-25 22:51" or "2025-05-22"
 const parseRawDate = (raw) => {
     if (!raw) return null;
     const str = String(raw).trim();
     
-    // Ignore PNRs and Ref Numbers
     if (/^\d+\.\d+$/.test(str)) return null; 
 
+    // Excel serial number conversion
+    if (!isNaN(raw) && typeof raw === 'number' && raw > 40000 && raw < 50000) {
+        const d = new Date(Math.round((raw - 25569) * 86400 * 1000));
+        return {
+            date: d.toISOString().split('T')[0],
+            month: d.toISOString().substring(0, 7),
+            shift: getShift(d.getUTCHours())
+        };
+    }
+
     // Match DD-MM-YY HH:MM format from raw CSV
-    const match = str.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})(?:\s+(\d{1,2}):(\d{2}))?/);
+    const match = str.match(/^(\d{1,4})[-/.](\d{1,2})[-/.](\d{1,4})(?:\s+(\d{1,2}):(\d{2}))?/);
     if (!match) return null;
 
-    let day = match[1].padStart(2, '0');
-    let month = match[2].padStart(2, '0');
-    let year = match[3];
-    if (year.length === 2) year = '20' + year; 
+    let part1 = match[1], part2 = match[2], part3 = match[3];
+    let year, month, day;
 
-    const dateStr = `${year}-${month}-${day}`;
-    const monthStr = `${year}-${month}`; // Useful for MoM aggregations
+    if (part1.length === 4) { year = part1; month = part2; day = part3; }
+    else if (part3.length === 4) { year = part3; month = part2; day = part1; }
+    else { year = '20' + part3; month = part2; day = part1; }
 
-    // Extract Shift from Hour
+    month = month.padStart(2, '0');
+    day = day.padStart(2, '0');
+
     let hour = 12;
     if (match[4]) hour = parseInt(match[4], 10);
-    
-    let shift = '00:00 - 08:00';
-    if (hour >= 8 && hour < 16) shift = '08:00 - 16:00';
-    else if (hour >= 16 && hour < 24) shift = '16:00 - 24:00';
 
-    return { date: dateStr, month: monthStr, shift };
+    return {
+        date: `${year}-${month}-${day}`,
+        month: `${year}-${month}`, 
+        shift: getShift(hour)
+    };
 };
 
-// Maps raw compTypeName and subTypeName to major categories
-const mapRawCategory = (type, subType, desc) => {
-    const combined = (String(type||'') + " " + String(subType||'') + " " + String(desc||'')).toLowerCase();
-    
-    if (combined.includes('pest') || combined.includes('rodent') || combined.includes('cockroach') || combined.includes('rat')) return 'Pest Control';
-    if (combined.includes('clean') || combined.includes('dirt') || combined.includes('garbage')) return 'Cleanliness';
-    if (combined.includes('bed') || combined.includes('linen') || combined.includes('blanket')) return 'Bedroll';
-    if (combined.includes('water') || combined.includes('toilet') || combined.includes('plumb') || combined.includes('tap')) return 'Watering';
-    if (combined.includes('maintain') || combined.includes('repair') || combined.includes('electric') || combined.includes('ac ') || combined.includes('fan')) return 'Maintenance';
-    if (combined.includes('staff') || combined.includes('behav') || combined.includes('rude') || combined.includes('bribe')) return 'Staff Behavior';
-    if (combined.includes('security') || combined.includes('theft') || combined.includes('police')) return 'Security';
-    
-    return 'Other/Miscellaneous';
+const getShift = (hour) => {
+    if (hour >= 8 && hour < 16) return '08:00 - 16:00';
+    if (hour >= 16 && hour < 24) return '16:00 - 24:00';
+    return '00:00 - 08:00';
 };
+
+const navItemsList = [
+  { id: 'overview', label: 'Overview & MoM', icon: LayoutDashboard },
+  { id: 'category', label: 'Category & Pest Control', icon: Sparkles },
+  { id: 'trains', label: 'Train Analysis Matrix', icon: TrainFront },
+  { id: 'operations', label: 'Shifts & Feedback', icon: Clock },
+];
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
@@ -77,7 +77,9 @@ export default function App() {
   const [lastSync, setLastSync] = useState('Checking...');
   const [dbData, setDbData] = useState(initialRawDatabase);
   
-  // Default Timeline filters
+  // Dynamic Dependency Injection (Prevents Build Errors & Requires Zero Setup)
+  const [supabaseClient, setSupabaseClient] = useState(null);
+
   const todayStr = new Date().toISOString().split('T')[0];
   const lastMonthStr = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   
@@ -92,11 +94,40 @@ export default function App() {
     setTimeout(() => setToastMessage(''), 5000);
   };
 
-  // Sync with Supabase on Load
+  // 1. Initialize Supabase & XLSX Dynamically
   useEffect(() => {
+    const initDependencies = async () => {
+      if (!window.XLSX) {
+        await new Promise((res) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+          s.onload = res;
+          document.head.appendChild(s);
+        });
+      }
+      if (!window.supabase) {
+        await new Promise((res) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+          s.onload = res;
+          document.head.appendChild(s);
+        });
+      }
+      
+      const url = 'https://npfuxifktdmxmzprfcxm.supabase.co';
+      const key = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZnV4aWZrdGRteG16cHJmY3htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2MjMwMDMsImV4cCI6MjA5NDE5OTAwM30.cCheIUxTAQWyoVyIwOLRd5usiyFI-q2GIn3A9NPFL78';
+      setSupabaseClient(window.supabase.createClient(url, key));
+    };
+    initDependencies();
+  }, []);
+
+  // 2. Fetch Data from Supabase
+  useEffect(() => {
+    if (!supabaseClient) return;
+
     const fetchInitialData = async () => {
       try {
-        const { data } = await supabase.from('railmadad_sync').select('*').eq('id', 1).single();
+        const { data } = await supabaseClient.from('railmadad_sync').select('*').eq('id', 1).single();
         if (data && data.json_data && data.json_data.records) {
           setDbData(data.json_data);
           setLastSync(new Date(data.last_updated).toLocaleTimeString());
@@ -108,17 +139,18 @@ export default function App() {
         }
       } catch (err) { console.error("Fetch Error:", err); }
     };
+    
     fetchInitialData();
 
-    const channel = supabase.channel('schema-db-changes').on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'railmadad_sync' }, (payload) => {
+    const channel = supabaseClient.channel('schema-db-changes').on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'railmadad_sync' }, (payload) => {
         if (payload.new.json_data && payload.new.json_data.records) {
             setDbData(payload.new.json_data);
             setLastSync(new Date(payload.new.last_updated).toLocaleTimeString());
         }
     }).subscribe();
 
-    return () => supabase.removeChannel(channel);
-  }, []);
+    return () => supabaseClient.removeChannel(channel);
+  }, [supabaseClient]);
 
   // --- CORE RAW DATA AGGREGATOR ---
   const { 
@@ -141,13 +173,16 @@ export default function App() {
        unsat: validRecords.length > 0 ? ((unsatCount / validRecords.length) * 100).toFixed(1) : 0,
     };
 
-    // 2. Month-over-Month (MoM) Bar Chart Data & Category MoM Table
     const momMap = {};
     const catMomMap = {};
     const mSet = new Set();
+    const trainMap = {};
+    const catSet = new Set();
+    const feedbackMap = {};
+    const shiftMap = { '00:00 - 08:00': 0, '08:00 - 16:00': 0, '16:00 - 24:00': 0 };
 
     validRecords.forEach(r => { 
-        // Total MoM
+        // MoM Data
         momMap[r.month] = (momMap[r.month] || 0) + 1; 
         
         // Category MoM
@@ -155,62 +190,86 @@ export default function App() {
         if (!catMomMap[r.category]) catMomMap[r.category] = { Total: 0 };
         catMomMap[r.category][r.month] = (catMomMap[r.category][r.month] || 0) + 1;
         catMomMap[r.category].Total += 1;
+
+        // Train Matrix
+        catSet.add(r.category);
+        if (!trainMap[r.train]) trainMap[r.train] = { train: r.train, Total: 0 };
+        trainMap[r.train].Total += 1;
+        trainMap[r.train][r.category] = (trainMap[r.train][r.category] || 0) + 1;
+
+        // Feedback
+        let rate = String(r.rating || 'Not Rated').trim();
+        if(rate === '' || rate.toLowerCase() === 'null') rate = 'Not Rated';
+        feedbackMap[rate] = (feedbackMap[rate] || 0) + 1;
+
+        // Shifts
+        if(shiftMap[r.shift] !== undefined) shiftMap[r.shift] += 1;
     });
 
     const momData = Object.entries(momMap).map(([month, count]) => ({ month, count })).sort((a,b) => a.month.localeCompare(b.month));
     const monthsSorted = Array.from(mSet).sort();
     const catMomData = Object.entries(catMomMap).map(([category, counts]) => ({ category, ...counts })).sort((a,b) => b.Total - a.Total);
-
-    // 3. Train Analysis Matrix & Chart
-    const trainMap = {};
-    const catSet = new Set();
-    validRecords.forEach(r => {
-        catSet.add(r.category);
-        if (!trainMap[r.train]) trainMap[r.train] = { train: r.train, Total: 0 };
-        trainMap[r.train].Total += 1;
-        trainMap[r.train][r.category] = (trainMap[r.train][r.category] || 0) + 1;
-    });
     const trainData = Object.values(trainMap).sort((a,b) => b.Total - a.Total);
     const uniqueCats = Array.from(catSet).sort();
-
-    // 4. Feedback Type Categorization
-    const feedbackMap = {};
-    validRecords.forEach(r => {
-        let rate = String(r.rating || 'Not Rated').trim();
-        if(rate === '' || rate.toLowerCase() === 'null') rate = 'Not Rated';
-        feedbackMap[rate] = (feedbackMap[rate] || 0) + 1;
-    });
     const feedbackData = Object.entries(feedbackMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
 
-    // 5. High-Priority Extraction Tables
+    // Extraction Tables
     const unsatTable = validRecords.filter(r => (r.rating||'').toLowerCase().includes('unsatisfactory'));
-    const pestTable = validRecords.filter(r => r.category === 'Pest Control');
-
-    // 6. Shift wise Data
-    const shiftMap = { '00:00 - 08:00': 0, '08:00 - 16:00': 0, '16:00 - 24:00': 0 };
-    validRecords.forEach(r => { if(shiftMap[r.shift] !== undefined) shiftMap[r.shift] += 1; });
+    const pestTable = validRecords.filter(r => r.isPest);
     const shiftData = Object.entries(shiftMap).map(([shift, complaints]) => ({ shift, complaints }));
 
     return { kpis, momData, catMomData, monthsSorted, trainData, uniqueCats, feedbackData, unsatTable, pestTable, shiftData };
   }, [dbData, fromDate, toDate]);
 
-  // --- RAW DATA EXCEL/CSV PARSER (WITH EXACT DEDUPLICATION) ---
+  // --- RAW DATA EXCEL/CSV PARSER ---
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
-    if (!file) return;
+    if (!file || !window.XLSX || !supabaseClient) {
+        if (!window.XLSX) showToast("Parser engines are still loading. Please wait a second and try again.");
+        return;
+    }
+
     setIsUploading(true);
     
     const reader = new FileReader();
     reader.onload = async (evt) => {
       try {
         const buffer = evt.target.result;
-        const workbook = XLSX.read(buffer, { type: 'array' });
-        
-        // Raw data is always on the first sheet
+        const workbook = window.XLSX.read(buffer, { type: 'array' });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rawJsonObjects = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+        const rawArray = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
         
-        if (rawJsonObjects.length === 0) throw new Error("The uploaded sheet is empty.");
+        if (rawArray.length === 0) throw new Error("The uploaded sheet is empty.");
+
+        // Identify EXACT Raw Data Headers (Resilient to empty rows at top)
+        let headerRowIdx = -1;
+        let headers = [];
+        for (let i = 0; i < Math.min(20, rawArray.length); i++) {
+            const row = rawArray[i];
+            if (row.some(c => String(c).toLowerCase().trim() === 'complaintrefno' || String(c).toLowerCase().trim() === 'createdon')) {
+                headerRowIdx = i;
+                headers = row.map(c => String(c).toLowerCase().trim());
+                break;
+            }
+        }
+
+        if (headerRowIdx === -1) {
+            showToast("Warning: Could not find 'complaintRefNo' or 'createdOn' in the file. Ensure it is a Raw RailMadad Export.");
+            setIsUploading(false);
+            e.target.value = null; 
+            return;
+        }
+
+        const refIdx = headers.indexOf('complaintrefno');
+        const dateIdx = headers.indexOf('createdon');
+        const catIdx = headers.indexOf('comptypename');
+        const subCatIdx = headers.indexOf('subtypename');
+        const trainIdx = headers.indexOf('trainstation');
+        const trainNameIdx = headers.indexOf('trainnameforreport');
+        const rateIdx = headers.indexOf('rating');
+        const descIdx = headers.indexOf('complaintdesc');
+        const remarksIdx = headers.indexOf('remarks');
+        const statusIdx = headers.indexOf('status');
 
         const existingMap = new Map();
         (dbData.records || []).forEach(r => existingMap.set(r.id, r));
@@ -218,49 +277,54 @@ export default function App() {
         let newRecordsAdded = 0;
         let duplicatesSkipped = 0;
 
-        rawJsonObjects.forEach((row) => {
-            // Lowercase keys to protect against whitespace or case changes in raw export
-            const lowerRow = {};
-            for(let key in row) { lowerRow[key.toLowerCase().trim()] = row[key]; }
+        for (let i = headerRowIdx + 1; i < rawArray.length; i++) {
+            const row = rawArray[i];
+            if (!row || row.length === 0) continue;
 
-            const refNo = lowerRow['complaintrefno'];
-            const createdOn = lowerRow['createdon'];
+            const refNo = refIdx !== -1 ? row[refIdx] : null;
+            const createdOn = dateIdx !== -1 ? row[dateIdx] : null;
+            if (!refNo || !createdOn) continue; 
 
-            if (!refNo || !createdOn) return; 
-
-            // Strict Deduplication via complaintRefNo
+            // Strict Deduplication
             const recordId = String(refNo).trim();
             if (existingMap.has(recordId)) {
                 duplicatesSkipped++;
-                return;
+                continue;
             }
 
             const parsedObj = parseRawDate(createdOn);
-            if (!parsedObj) return;
+            if (!parsedObj) continue;
 
-            const mappedCat = mapRawCategory(lowerRow['comptypename'], lowerRow['subtypename'], lowerRow['complaintdesc']);
+            // Raw Type & Pest Control Check
+            const rawCat = catIdx !== -1 && row[catIdx] ? String(row[catIdx]).trim() : 'Unknown';
+            const rawSubCat = subCatIdx !== -1 && row[subCatIdx] ? String(row[subCatIdx]).trim() : '';
+            const rawDesc = descIdx !== -1 && row[descIdx] ? String(row[descIdx]).trim() : '';
+            
+            const isPest = checkPestControl(rawSubCat, rawDesc);
 
-            // Extract 4/5-digit Train Number cleanly
-            const rawTrain = String(lowerRow['trainstation'] || '') + " " + String(lowerRow['trainnameforreport'] || '');
+            // Extract Train
+            const rawTrain = (trainIdx !== -1 ? String(row[trainIdx]) : "") + " " + (trainNameIdx !== -1 ? String(row[trainNameIdx]) : "");
             const matchTrain = rawTrain.match(/\b\d{4,5}\b/);
-            const trainNo = matchTrain ? matchTrain[0] : 'Unknown';
+            const trainNo = matchTrain ? matchTrain[0] : (trainIdx !== -1 && row[trainIdx] ? String(row[trainIdx]) : 'Unknown');
 
             const newRecord = {
                 id: recordId,
                 date: parsedObj.date,
                 month: parsedObj.month,
                 shift: parsedObj.shift,
-                category: mappedCat,
+                category: rawCat, // Sticking strictly to raw compTypeName
+                subType: rawSubCat,
+                isPest: isPest,
                 train: trainNo,
-                rating: String(lowerRow['rating'] || 'Not Rated').trim(),
-                status: String(lowerRow['status'] || 'Unknown').trim(),
-                desc: String(lowerRow['complaintdesc'] || '').substring(0, 200),
-                remarks: String(lowerRow['remarks'] || '').substring(0, 200)
+                rating: rateIdx !== -1 ? String(row[rateIdx] || 'Not Rated').trim() : 'Not Rated',
+                status: statusIdx !== -1 ? String(row[statusIdx] || 'Unknown').trim() : 'Unknown',
+                desc: rawDesc.substring(0, 200),
+                remarks: remarksIdx !== -1 ? String(row[remarksIdx] || '').substring(0, 200) : ''
             };
 
             existingMap.set(newRecord.id, newRecord);
             newRecordsAdded++;
-        });
+        }
 
         if (newRecordsAdded > 0) {
             const newData = { records: Array.from(existingMap.values()) };
@@ -272,10 +336,9 @@ export default function App() {
             setFromDate(sortedDates[0]);
             setToDate(sortedDates[sortedDates.length - 1]);
 
-            showToast(`Success! Extracted ${newRecordsAdded} new raw complaints. Skipped ${duplicatesSkipped} existing duplicates.`);
+            showToast(`Success! Appended ${newRecordsAdded} new raw complaints. Skipped ${duplicatesSkipped} exact duplicates.`);
 
-            // Push to Supabase
-            await supabase.from('railmadad_sync').update({ 
+            await supabaseClient.from('railmadad_sync').update({ 
                 json_data: newData, 
                 last_updated: new Date().toISOString() 
             }).eq('id', 1);
@@ -283,7 +346,7 @@ export default function App() {
         } else if (duplicatesSkipped > 0) {
             showToast(`Upload complete. No new data found. Skipped ${duplicatesSkipped} exact duplicates.`);
         } else {
-            showToast("Warning: Uploaded file does not appear to be a raw RailMadad export. 'complaintRefNo' missing.");
+            showToast("Warning: Uploaded file contained no valid date entries.");
         }
       } catch (err) {
         console.error("Parse Error:", err);
@@ -296,6 +359,7 @@ export default function App() {
   };
 
   const executeHardReset = async () => {
+    if (!supabaseClient) return;
     setShowResetModal(false);
     showToast("Wiping database...");
     
@@ -304,23 +368,15 @@ export default function App() {
     setFromDate(today); setToDate(today);
 
     try {
-      await supabase.from('railmadad_sync').update({ json_data: initialRawDatabase, last_updated: new Date().toISOString() }).eq('id', 1);
+      await supabaseClient.from('railmadad_sync').update({ json_data: initialRawDatabase, last_updated: new Date().toISOString() }).eq('id', 1);
       showToast("Database successfully wiped clean.");
     } catch (err) {
       showToast("Error resetting database.");
     }
   };
 
-  const navItemsList = [
-    { id: 'overview', label: 'Overview & Feedback', icon: LayoutDashboard },
-    { id: 'trains', label: 'Train Analysis', icon: TrainFront },
-    { id: 'category', label: 'Category & Pests', icon: Sparkles },
-    { id: 'operations', label: 'Shifts & Ops', icon: Clock },
-  ];
-
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans text-slate-900 relative">
-      {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 bg-slate-800 text-white px-6 py-4 rounded-xl shadow-2xl z-50 flex items-center animate-bounce border border-slate-700">
           <Sparkles className="w-5 h-5 mr-3 text-indigo-400" />
@@ -328,7 +384,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Hard Reset Modal */}
       {showResetModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white p-6 rounded-2xl shadow-xl max-w-sm w-full border border-slate-100 transform transition-all">
@@ -347,7 +402,6 @@ export default function App() {
         </div>
       )}
       
-      {/* SIDEBAR */}
       <aside className={`fixed md:sticky top-0 left-0 z-40 w-64 h-screen transition-transform transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 bg-white border-r border-slate-200 shadow-sm flex flex-col`}>
         <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-indigo-700">
           <div>
@@ -399,7 +453,6 @@ export default function App() {
         </div>
       </aside>
 
-      {/* MAIN CONTENT AREA */}
       <main className="flex-1 flex flex-col max-w-full overflow-hidden bg-slate-50">
         
         <header className="md:hidden bg-indigo-700 text-white p-4 flex justify-between items-center sticky top-0 z-30 shadow-md">
@@ -407,7 +460,6 @@ export default function App() {
           <button onClick={() => setIsMobileMenuOpen(true)}><Menu className="w-6 h-6" /></button>
         </header>
 
-        {/* Global Filter Bar */}
         <div className="bg-white border-b border-slate-200 px-4 md:px-8 py-4 flex flex-col lg:flex-row justify-between items-start lg:items-center space-y-4 lg:space-y-0 z-20 sticky top-0 md:top-0 shadow-sm">
            <h2 className="text-xl font-black text-slate-800 tracking-tight">{navItemsList.find(i => i.id === activeTab)?.label}</h2>
            <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4 bg-slate-50 border border-slate-200 p-2 rounded-xl">
@@ -425,7 +477,6 @@ export default function App() {
 
         <div className="p-4 md:p-8 flex-1 overflow-y-auto space-y-8">
 
-          {/* EMPTY DATABASE STATE */}
           {(dbData.records || []).length === 0 ? (
              <div className="bg-white p-16 mt-10 rounded-3xl border border-slate-200 flex flex-col items-center justify-center text-center max-w-2xl mx-auto shadow-sm">
                <div className="w-24 h-24 bg-indigo-50 rounded-full flex items-center justify-center mb-6"><FileSpreadsheet className="w-12 h-12 text-indigo-400" /></div>
@@ -464,90 +515,96 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    {/* MoM Bar Chart */}
-                    <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                      <div className="flex items-center justify-between mb-6">
-                         <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Month-over-Month (MoM) Trend</h3>
-                         <BarChart3 className="text-slate-300 w-5 h-5"/>
-                      </div>
-                      <div className="h-80">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={momData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                            <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dy={10} />
-                            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
-                            <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
-                            <Bar dataKey="count" name="Total Complaints" fill="#3b82f6" radius={[6, 6, 0, 0]} barSize={50} />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
+                  <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                    <div className="flex items-center justify-between mb-6">
+                       <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Month-over-Month (MoM) Trend</h3>
+                       <BarChart3 className="text-slate-300 w-5 h-5"/>
                     </div>
-
-                    {/* Feedback Pie */}
-                    <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                        <div className="flex items-center justify-between mb-6">
-                           <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Feedback Type Categorization</h3>
-                           <MessageSquareWarning className="text-slate-300 w-5 h-5"/>
-                        </div>
-                        <div className="h-80">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                              <Pie data={feedbackData} cx="50%" cy="50%" innerRadius={80} outerRadius={120} paddingAngle={4} dataKey="value">
-                                {feedbackData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
-                              </Pie>
-                              <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
-                              <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                            </PieChart>
-                          </ResponsiveContainer>
-                        </div>
+                    <div className="h-80">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={momData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dy={10} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
+                          <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                          <Bar dataKey="count" name="Total Complaints" fill="#3b82f6" radius={[6, 6, 0, 0]} barSize={50} />
+                        </BarChart>
+                      </ResponsiveContainer>
                     </div>
-                  </div>
-
-                  {/* Unsatisfactory Table */}
-                  <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-                     <div className="px-6 py-5 border-b border-slate-100 bg-rose-50 flex items-center">
-                         <MessageSquareWarning className="w-5 h-5 text-rose-600 mr-2" />
-                         <h3 className="text-base font-bold text-rose-900">Highest Feedback: Unsatisfactory Cases</h3>
-                     </div>
-                     {unsatTable.length === 0 ? (
-                       <div className="p-8 text-center text-slate-500 font-medium">No unsatisfactory feedback logged in this period.</div>
-                     ) : (
-                       <div className="overflow-x-auto max-h-96">
-                         <table className="min-w-full text-left border-collapse">
-                           <thead className="sticky top-0 bg-white shadow-sm z-10">
-                             <tr className="text-slate-400 text-[10px] uppercase tracking-widest border-b border-slate-100">
-                               <th className="p-4 font-bold">Ref No.</th>
-                               <th className="p-4 font-bold">Date</th>
-                               <th className="p-4 font-bold">Train</th>
-                               <th className="p-4 font-bold">Category</th>
-                               <th className="p-4 font-bold">Passenger Description</th>
-                             </tr>
-                           </thead>
-                           <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
-                             {unsatTable.map((row, idx) => (
-                               <tr key={idx} className="hover:bg-slate-50">
-                                 <td className="p-4 font-mono text-[10px] text-slate-400 whitespace-nowrap">{row.id}</td>
-                                 <td className="p-4 font-medium text-slate-500 whitespace-nowrap">{row.date}</td>
-                                 <td className="p-4 font-bold text-slate-800">{row.train}</td>
-                                 <td className="p-4"><span className="px-2 py-1 bg-slate-100 rounded text-xs font-bold text-slate-600">{row.category}</span></td>
-                                 <td className="p-4 text-xs text-slate-600 max-w-md">{row.desc}</td>
-                               </tr>
-                             ))}
-                           </tbody>
-                         </table>
-                       </div>
-                     )}
                   </div>
                 </div>
               )}
 
-              {/* TAB 2: TRAIN ANALYSIS */}
+              {/* TAB 2: CATEGORY & PEST CONTROL */}
+              {activeTab === 'category' && (
+                <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                    <div className="px-6 py-5 border-b border-slate-100 bg-slate-50"><h3 className="text-base font-bold text-slate-800">Category Wise Month-over-Month (MoM)</h3></div>
+                    <div className="overflow-x-auto max-h-[500px]">
+                      <table className="min-w-full text-left border-collapse">
+                        <thead className="sticky top-0 bg-slate-100 z-10 shadow-sm">
+                          <tr className="text-slate-500 text-[10px] uppercase tracking-widest">
+                            <th className="p-4 font-bold border-b border-slate-200">Raw Category Name</th>
+                            {monthsSorted.map(m => <th key={m} className="p-4 font-bold border-b border-slate-200">{m}</th>)}
+                            <th className="p-4 font-black border-b border-slate-200 text-slate-800">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
+                          {catMomData.map((row, idx) => (
+                            <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                              <td className="p-4 font-bold text-slate-900 flex items-center"><Sparkles className="w-4 h-4 mr-2 text-indigo-400" />{row.category}</td>
+                              {monthsSorted.map(m => <td key={m} className="p-4 font-medium text-slate-600">{row[m] || '-'}</td>)}
+                              <td className="p-4 font-black text-indigo-600">{row.Total}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-2xl border border-rose-100 shadow-sm overflow-hidden">
+                    <div className="px-6 py-5 border-b border-rose-100 bg-rose-50 flex items-center">
+                       <Bug className="w-5 h-5 text-rose-600 mr-2" />
+                       <h3 className="text-base font-bold text-rose-900">Category: Pest Control & Rodent Target List</h3>
+                    </div>
+                    {pestTable.length === 0 ? (
+                      <div className="p-8 text-center text-slate-500 font-medium">No Pest Control/Rodent complaints identified based on subtype scanning in this period.</div>
+                    ) : (
+                      <div className="overflow-x-auto max-h-96">
+                        <table className="min-w-full text-left border-collapse">
+                          <thead className="sticky top-0 bg-white shadow-sm z-10">
+                            <tr className="text-slate-400 text-[10px] uppercase tracking-widest border-b border-slate-100">
+                              <th className="p-4 font-bold">Ref No</th>
+                              <th className="p-4 font-bold">Date</th>
+                              <th className="p-4 font-bold">Train</th>
+                              <th className="p-4 font-bold">Passenger SubType/Description</th>
+                            </tr>
+                          </thead>
+                          <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
+                            {pestTable.map((row, idx) => (
+                              <tr key={idx} className="hover:bg-rose-50/50">
+                                <td className="p-4 font-mono text-[10px] text-slate-400">{row.id}</td>
+                                <td className="p-4 font-medium whitespace-nowrap">{row.date}</td>
+                                <td className="p-4 font-bold text-rose-700">{row.train}</td>
+                                <td className="p-4 text-slate-600 max-w-md">
+                                  <span className="font-semibold text-slate-800">{row.subType}</span> <br/>
+                                  <span className="text-xs">{row.desc}</span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: TRAIN ANALYSIS */}
               {activeTab === 'trains' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  {/* Train Chart */}
                   <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Top Trains by Total Complaints</h3>
+                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Top 15 Trains by Total Complaints</h3>
                     <div className="h-[400px]">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={trainData.slice(0, 15)} layout="vertical" margin={{ left: 60, right: 20 }}>
@@ -561,15 +618,14 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Train vs Category Matrix */}
                   <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-                    <div className="px-6 py-5 border-b border-slate-100 bg-slate-50"><h3 className="text-base font-bold text-slate-800">Train Number vs. Category Matrix</h3></div>
-                    <div className="overflow-x-auto max-h-[500px]">
+                    <div className="px-6 py-5 border-b border-slate-100 bg-slate-50"><h3 className="text-base font-bold text-slate-800">Train Number vs. Raw Category Matrix</h3></div>
+                    <div className="overflow-x-auto max-h-[600px]">
                       <table className="min-w-full text-left border-collapse">
                         <thead className="sticky top-0 bg-slate-100 z-10 shadow-sm">
                           <tr className="text-slate-500 text-[10px] uppercase tracking-widest">
                             <th className="p-4 font-bold border-b border-slate-200">Train Number</th>
-                            {uniqueCats.map(c => <th key={c} className="p-4 font-bold border-b border-slate-200">{c}</th>)}
+                            {uniqueCats.map(c => <th key={c} className="p-4 font-bold border-b border-slate-200 whitespace-nowrap">{c}</th>)}
                             <th className="p-4 font-black border-b border-slate-200 text-slate-800">Total</th>
                           </tr>
                         </thead>
@@ -588,71 +644,7 @@ export default function App() {
                 </div>
               )}
 
-              {/* TAB 3: CATEGORY & PEST CONTROL */}
-              {activeTab === 'category' && (
-                <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  {/* Category MoM Pivot Table */}
-                  <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-                    <div className="px-6 py-5 border-b border-slate-100 bg-slate-50"><h3 className="text-base font-bold text-slate-800">Category Wise Month-over-Month (MoM)</h3></div>
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full text-left border-collapse">
-                        <thead>
-                          <tr className="bg-slate-100 text-slate-500 text-[10px] uppercase tracking-widest">
-                            <th className="p-4 font-bold border-b border-slate-200">Category</th>
-                            {monthsSorted.map(m => <th key={m} className="p-4 font-bold border-b border-slate-200">{m}</th>)}
-                            <th className="p-4 font-black border-b border-slate-200 text-slate-800">Total</th>
-                          </tr>
-                        </thead>
-                        <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
-                          {catMomData.map((row, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                              <td className="p-4 font-bold text-slate-900 flex items-center"><Sparkles className="w-4 h-4 mr-2 text-indigo-400" />{row.category}</td>
-                              {monthsSorted.map(m => <td key={m} className="p-4 font-medium">{row[m] || '-'}</td>)}
-                              <td className="p-4 font-black text-indigo-600">{row.Total}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  {/* Pest Control Raw Extraction */}
-                  <div className="bg-white rounded-2xl border border-rose-100 shadow-sm overflow-hidden">
-                    <div className="px-6 py-5 border-b border-rose-100 bg-rose-50 flex items-center">
-                       <Bug className="w-5 h-5 text-rose-600 mr-2" />
-                       <h3 className="text-base font-bold text-rose-900">Pest Control & Rodent Target List</h3>
-                    </div>
-                    {pestTable.length === 0 ? (
-                      <div className="p-8 text-center text-slate-500 font-medium">No Pest Control/Rodent complaints identified in this period.</div>
-                    ) : (
-                      <div className="overflow-x-auto max-h-96">
-                        <table className="min-w-full text-left border-collapse">
-                          <thead className="sticky top-0 bg-white shadow-sm z-10">
-                            <tr className="text-slate-400 text-[10px] uppercase tracking-widest border-b border-slate-100">
-                              <th className="p-4 font-bold">Ref No</th>
-                              <th className="p-4 font-bold">Date</th>
-                              <th className="p-4 font-bold">Train</th>
-                              <th className="p-4 font-bold">Passenger Description</th>
-                            </tr>
-                          </thead>
-                          <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
-                            {pestTable.map((row, idx) => (
-                              <tr key={idx} className="hover:bg-rose-50/50">
-                                <td className="p-4 font-mono text-[10px] text-slate-400">{row.id}</td>
-                                <td className="p-4 font-medium whitespace-nowrap">{row.date}</td>
-                                <td className="p-4 font-bold text-rose-700">{row.train}</td>
-                                <td className="p-4 text-slate-600 max-w-md">{row.desc}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 4: SHIFTS & OPERATIONS */}
+              {/* TAB 4: SHIFTS & FEEDBACK */}
               {activeTab === 'operations' && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden h-fit">
@@ -675,15 +667,62 @@ export default function App() {
                         </tbody>
                       </table>
                     </div>
-                  </div>
-                  
-                  {/* Info Card */}
-                  <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-8 flex flex-col justify-center items-center text-center h-fit">
-                      <Cpu className="w-16 h-16 text-indigo-300 mb-4" />
-                      <h3 className="text-lg font-bold text-indigo-900 mb-2">Automated Shift Engine</h3>
-                      <p className="text-indigo-700 text-sm max-w-sm">
-                        This table automatically calculates the 8-hour shift bracket for every complaint based on the timestamp provided in the raw <b>createdOn</b> column.
+                    <div className="bg-indigo-50 border-t border-indigo-100 p-4 text-center">
+                      <p className="text-indigo-700 text-xs font-medium">
+                        Automatically calculated using the exact timestamp in the raw <b>createdOn</b> column.
                       </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-8">
+                    <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                        <div className="flex items-center justify-between mb-6">
+                           <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Feedback Categorization</h3>
+                           <MessageSquareWarning className="text-slate-300 w-5 h-5"/>
+                        </div>
+                        <div className="h-64">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie data={feedbackData} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={4} dataKey="value">
+                                {feedbackData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
+                              </Pie>
+                              <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                              <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                       <div className="px-6 py-5 border-b border-slate-100 bg-rose-50 flex items-center">
+                           <MessageSquareWarning className="w-5 h-5 text-rose-600 mr-2" />
+                           <h3 className="text-base font-bold text-rose-900">Highest Feedback: Unsatisfactory Cases</h3>
+                       </div>
+                       {unsatTable.length === 0 ? (
+                         <div className="p-8 text-center text-slate-500 font-medium">No unsatisfactory feedback logged in this period.</div>
+                       ) : (
+                         <div className="overflow-x-auto max-h-96">
+                           <table className="min-w-full text-left border-collapse">
+                             <thead className="sticky top-0 bg-white shadow-sm z-10">
+                               <tr className="text-slate-400 text-[10px] uppercase tracking-widest border-b border-slate-100">
+                                 <th className="p-4 font-bold">Ref No.</th>
+                                 <th className="p-4 font-bold">Train</th>
+                                 <th className="p-4 font-bold">Description</th>
+                               </tr>
+                             </thead>
+                             <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
+                               {unsatTable.map((row, idx) => (
+                                 <tr key={idx} className="hover:bg-slate-50">
+                                   <td className="p-4 font-mono text-[10px] text-slate-400 whitespace-nowrap">{row.id}</td>
+                                   <td className="p-4 font-bold text-slate-800">{row.train}</td>
+                                   <td className="p-4 text-xs text-slate-600 max-w-md">{row.desc}</td>
+                                 </tr>
+                               ))}
+                             </tbody>
+                           </table>
+                         </div>
+                       )}
+                    </div>
                   </div>
                 </div>
               )}
