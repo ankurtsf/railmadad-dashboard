@@ -9,7 +9,7 @@ import {
   Sparkles, Menu, X, AlertTriangle, Upload, Calendar, Trash2,
   FileSpreadsheet, Bug, Map as LucideMap, Filter, ChevronDown, Loader2,
   Target, Moon, Sun, Download, TrendingUp, LogOut, Lock, Mail,
-  Eye, EyeOff, FileText, FileBarChart, BedDouble, Droplets, Wrench, Activity, BookOpen, ThumbsDown, ArrowUpRight, ArrowDownRight
+  Eye, EyeOff, FileText, FileBarChart, BedDouble, Droplets, Wrench, Activity, BookOpen, ThumbsDown, ArrowUpRight, ArrowDownRight, CheckCircle
 } from 'lucide-react';
 
 // ──────────────────────────────────────────────────────────────────
@@ -26,7 +26,17 @@ const STOP_WORDS = new Set([
   'and', 'the', 'was', 'for', 'that', 'with', 'from', 'this', 'have', 'not',
   'are', 'but', 'has', 'had', 'been', 'very', 'they', 'will', 'coach', 'train',
   'seat', 'berth', 'number', 'passenger', 'is', 'it', 'to', 'in', 'of', 'on',
-  'ai', 'generated', 'complaint', 'description', 'user', 'input'
+  'ai', 'generated', 'complaint', 'description', 'user', 'input', 'working',
+  'please', 'sir', 'madam', 'kindly', 'issue', 'problem', 'ticket', 'pnr',
+  'station', 'railway', 'resolved', 'fixed', 'closed', 'no', 'my', 'a',
+  'all', 'any', 'can', 'an', 'your', 'which', 'their', 'there', 'they',
+  'so', 'if', 'or', 'do', 'when', 'out', 'about', 'who', 'get', 'would',
+  'like', 'just', 'some', 'what', 'me', 'up', 'been', 'also', 'only',
+  'time', 'now', 'because', 'other', 'could', 'how', 'than', 'over', 'then',
+  'its', 'these', 'into', 'them', 'two', 'see', 'first', 'did', 'way', 'well',
+  'where', 'after', 'should', 'too', 'even', 'one', 'much', 'down', 'say',
+  'good', 'need', 'many', 'those', 'make', 'right', 'through', 'such', 'take',
+  'here', 'why', 'help', 'request'
 ]);
 
 // ──────────────────────────────────────────────────────────────────
@@ -140,16 +150,16 @@ const navItemsList = [
 ];
 
 const MetricCard = ({ title, value, todayValue, icon: Icon, accent, sparkColor, sparklineData, dataKey, onTodayClick, infoText, isCritical, extraIcon }) => (
-  <div className={`relative bg-white dark:bg-slate-900 rounded-xl p-5 shadow-sm border ${isCritical ? 'border-rose-400 bg-rose-50 dark:bg-rose-950/20' : 'border-slate-100 dark:border-slate-800'} flex flex-col justify-between overflow-hidden transition-colors h-32`}>
+  <div className={`relative bg-white dark:bg-slate-900 rounded-xl p-5 shadow-sm border ${isCritical ? 'border-rose-400 bg-rose-50 dark:bg-rose-950/20' : 'border-slate-100 dark:border-slate-800'} flex flex-col justify-between transition-colors h-32`}>
     <div className="relative z-10 flex justify-between items-start mb-1">
       <div className="flex items-center">
         <p className={`text-[11px] font-bold uppercase tracking-wider ${isCritical ? 'text-rose-700 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400'}`}>{title}</p>
         {infoText && (
           <div className="relative group ml-1.5 flex items-center justify-center">
             <div className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[9px] font-black cursor-help ${isCritical ? 'bg-rose-200 text-rose-700 dark:bg-rose-900 dark:text-rose-300' : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>i</div>
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2.5 bg-slate-800 dark:bg-slate-700 text-white text-xs font-medium rounded-lg shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 text-center leading-tight">
+            <div className="absolute bottom-full right-[-50px] md:left-1/2 md:-translate-x-1/2 mb-2 w-48 p-2.5 bg-slate-800 dark:bg-slate-700 text-white text-xs font-medium rounded-lg shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 text-center leading-tight">
               {infoText}
-              <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800 dark:border-t-slate-700"></div>
+              <div className="absolute top-full right-8 md:left-1/2 md:-translate-x-1/2 border-4 border-transparent border-t-slate-800 dark:border-t-slate-700"></div>
             </div>
           </div>
         )}
@@ -176,7 +186,7 @@ const MetricCard = ({ title, value, todayValue, icon: Icon, accent, sparkColor, 
       </div>
     )}
     {sparklineData && sparklineData.length > 0 && (
-      <div className="absolute bottom-0 left-0 right-0 h-16 opacity-30 pointer-events-none">
+      <div className="absolute bottom-0 left-0 right-0 h-16 opacity-30 pointer-events-none overflow-hidden rounded-b-xl">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={sparklineData}>
             <Line type="monotone" dataKey={dataKey} stroke={sparkColor} strokeWidth={3} dot={false} isAnimationActive={false} />
@@ -593,6 +603,7 @@ export default function App() {
       sparkObj.total++;
       if (isToday) kpisToday.total++;
 
+      // BUG FIX: Added 'bed roll' to match un-concatenated strings
       if (catLow.includes('bedroll') || catLow.includes('bed roll') || catLow.includes('linen')) { kpis.bedroll++; sparkObj.bedroll++; if(isToday) kpisToday.bedroll++; }
       if (catLow.includes('clean') || catLow.includes('dirt')) { kpis.clean++; sparkObj.clean++; if(isToday) kpisToday.clean++; }
       if (catLow.includes('water') || catLow.includes('plumb')) { kpis.water++; sparkObj.water++; if(isToday) kpisToday.water++; }
@@ -803,7 +814,7 @@ export default function App() {
        criticalPests: pestDefectTable.filter(r => r.isPest).length,
        topBottleneckStation: wateringList.length > 0 ? wateringList[0].station : '—',
        worstCoachClass: coachMatrix.length > 0 ? coachMatrix[0].coachType : '—',
-       fakeCloseRate: quickCloseData[0].Unsatisfactory || 0,
+       fakeCloseRate: quickCloseData.length > 0 ? quickCloseData[0].Unsatisfactory : 0,
        overallUnsat: totalRated > 0 ? ((totalUnsat / totalRated) * 100).toFixed(1) : 0,
        topGrievance: wordCloud.length > 0 ? wordCloud[0].text : '—'
     };
@@ -1218,13 +1229,31 @@ export default function App() {
           <button onClick={() => setIsMobileMenuOpen(true)}><Menu className="w-6 h-6" /></button>
         </header>
 
-        {/* HEADER + FILTERS */}
+        {/* HEADER + EXPORT/TOGGLE */}
         <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 z-20 sticky top-0 shadow-sm">
-          <div className="px-4 md:px-8 py-4 flex justify-between items-center border-b border-slate-100 dark:border-slate-800">
+          <div className="px-4 md:px-8 py-4 flex flex-col md:flex-row md:justify-between md:items-center border-b border-slate-100 dark:border-slate-800 space-y-4 md:space-y-0">
             <h2 className="text-xl font-black text-slate-800 dark:text-white tracking-tight">
               {navItemsList.find((i) => i.id === activeTab)?.label}
             </h2>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2 overflow-x-auto custom-scrollbar pb-2 md:pb-0">
+              
+              {/* Global Quick Date Toggle */}
+              <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-1 border border-slate-200 dark:border-slate-700">
+                {['Today', 'This Week', 'This Month', 'Overall'].map(preset => (
+                  <button
+                    key={preset}
+                    onClick={() => handleDatePreset(preset)}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap ${
+                      datePreset === preset
+                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-white shadow-sm'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+
               {/* Export Dropdown */}
               <div className="relative">
                 <button
@@ -1261,27 +1290,10 @@ export default function App() {
             </div>
           </div>
 
+          {/* ADVANCED FILTERS */}
           {showFilters && (
             <div className="px-4 md:px-8 py-4 bg-slate-50 dark:bg-slate-900/60 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4 border-b border-slate-200 dark:border-slate-800 relative z-30">
               
-              <div className="col-span-2 flex items-end">
-                <div className="flex bg-slate-200 dark:bg-slate-800 rounded-lg p-1 border border-slate-300 dark:border-slate-700 w-full justify-between shadow-inner">
-                  {['Today', 'This Week', 'This Month', 'Overall'].map(preset => (
-                    <button
-                      key={preset}
-                      onClick={() => handleDatePreset(preset)}
-                      className={`flex-1 px-2 py-1.5 text-[10px] sm:text-xs font-bold rounded-md transition-all truncate ${
-                        datePreset === preset
-                          ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-white shadow-sm'
-                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-                      }`}
-                    >
-                      {preset}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               <div className="flex flex-col relative">
                 <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">From Date</span>
                 <div className="relative">
@@ -1448,7 +1460,6 @@ export default function App() {
                       </table>
                     </div>
                   </Card>
-
                 </div>
               )}
 
