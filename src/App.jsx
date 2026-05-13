@@ -149,8 +149,8 @@ const navItemsList = [
   { id: 'dictionary', label: 'Data Dictionary', icon: BookOpen },
 ];
 
-const MetricCard = ({ title, value, todayValue, icon: Icon, accent, sparkColor, sparklineData, dataKey, onTodayClick, infoText, isCritical, extraIcon }) => (
-  <div className={`relative bg-white dark:bg-slate-900 rounded-xl p-5 shadow-sm border ${isCritical ? 'border-rose-400 bg-rose-50 dark:bg-rose-950/20' : 'border-slate-100 dark:border-slate-800'} flex flex-col justify-between transition-colors h-32`}>
+const MetricCard = ({ title, value, todayValue, icon: Icon, accent, sparkColor, sparklineData, dataKey, onTodayClick, infoText, isCritical, extraIcon, subtext }) => (
+  <div className={`relative hover:z-50 bg-white dark:bg-slate-900 rounded-xl p-5 shadow-sm border ${isCritical ? 'border-rose-400 bg-rose-50 dark:bg-rose-950/20' : 'border-slate-100 dark:border-slate-800'} flex flex-col justify-between transition-colors h-32`}>
     <div className="relative z-10 flex justify-between items-start mb-1">
       <div className="flex items-center">
         <p className={`text-[11px] font-bold uppercase tracking-wider ${isCritical ? 'text-rose-700 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400'}`}>{title}</p>
@@ -168,23 +168,34 @@ const MetricCard = ({ title, value, todayValue, icon: Icon, accent, sparkColor, 
         <Icon className="w-4 h-4 text-white" />
       </div>
     </div>
-    <div className="relative z-10 flex items-center">
-        <h3 className={`text-3xl font-black ${isCritical ? 'text-rose-800 dark:text-rose-300' : 'text-slate-900 dark:text-white'} flex items-center`}>
-          {value}
-          {extraIcon && <span className="ml-2">{extraIcon}</span>}
-        </h3>
+    
+    <div className="relative z-10 flex flex-col mt-auto pt-1">
+        <div className="flex items-end">
+            <h3 className={`text-3xl font-black ${isCritical ? 'text-rose-800 dark:text-rose-300' : 'text-slate-900 dark:text-white'} flex items-center`}>
+              {value}
+              {extraIcon && <span className="ml-2">{extraIcon}</span>}
+            </h3>
+        </div>
+        
+        {subtext && (
+            <span className={`text-xs font-bold mt-1 truncate ${isCritical ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400'}`}>
+              {subtext}
+            </span>
+        )}
+        
+        {todayValue !== undefined && onTodayClick && (
+          <div className="mt-1">
+              <button 
+                 onClick={onTodayClick} 
+                 title="Click to filter by Today"
+                 className="text-[10px] font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/40 hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors cursor-pointer"
+              >
+                 Today: {todayValue}
+              </button>
+          </div>
+        )}
     </div>
-    {todayValue !== undefined && onTodayClick && (
-      <div className="relative z-10 flex items-center mt-auto pt-2">
-          <button 
-             onClick={onTodayClick} 
-             title="Click to filter by Today"
-             className="text-[10px] font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/40 hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors cursor-pointer"
-          >
-             Today: {todayValue}
-          </button>
-      </div>
-    )}
+    
     {sparklineData && sparklineData.length > 0 && (
       <div className="absolute bottom-0 left-0 right-0 h-16 opacity-30 pointer-events-none overflow-hidden rounded-b-xl">
         <ResponsiveContainer width="100%" height="100%">
@@ -603,7 +614,6 @@ export default function App() {
       sparkObj.total++;
       if (isToday) kpisToday.total++;
 
-      // BUG FIX: Added 'bed roll' to match un-concatenated strings
       if (catLow.includes('bedroll') || catLow.includes('bed roll') || catLow.includes('linen')) { kpis.bedroll++; sparkObj.bedroll++; if(isToday) kpisToday.bedroll++; }
       if (catLow.includes('clean') || catLow.includes('dirt')) { kpis.clean++; sparkObj.clean++; if(isToday) kpisToday.clean++; }
       if (catLow.includes('water') || catLow.includes('plumb')) { kpis.water++; sparkObj.water++; if(isToday) kpisToday.water++; }
@@ -699,7 +709,7 @@ export default function App() {
       });
     });
     
-    // WoW Calc (relative to targetToday or latest record)
+    // WoW Calc
     let current7DaysVol = 0;
     let previous7DaysVol = 0;
     if (rawRecords.length > 0) {
@@ -814,6 +824,7 @@ export default function App() {
        criticalPests: pestDefectTable.filter(r => r.isPest).length,
        topBottleneckStation: wateringList.length > 0 ? wateringList[0].station : '—',
        worstCoachClass: coachMatrix.length > 0 ? coachMatrix[0].coachType : '—',
+       worstCoachCount: coachMatrix.length > 0 ? `${coachMatrix[0].Total} cases` : '',
        fakeCloseRate: quickCloseData.length > 0 ? quickCloseData[0].Unsatisfactory : 0,
        overallUnsat: totalRated > 0 ? ((totalUnsat / totalRated) * 100).toFixed(1) : 0,
        topGrievance: wordCloud.length > 0 ? wordCloud[0].text : '—'
@@ -1582,15 +1593,39 @@ export default function App() {
                       accent={globalKpis.wowChange <= 0 ? 'bg-emerald-600' : 'bg-rose-600'} 
                       extraIcon={globalKpis.wowChange <= 0 ? <ArrowDownRight className="w-6 h-6 text-emerald-500" /> : <ArrowUpRight className="w-6 h-6 text-rose-500" />}
                       infoText="Total complaint volume of the last 7 days compared against the preceding 7 days."
+                      subtext={globalKpis.wowChange <= 0 ? "decrease from last week" : "increase from last week"}
                     />
                     <MetricCard 
                       title="Peak Complaint Day" 
                       value={globalKpis.peakComplaintDay ? globalKpis.peakComplaintDay.count : '0'} 
-                      todayValue={globalKpis.peakComplaintDay ? formatHumanDate(globalKpis.peakComplaintDay.key) : '—'}
+                      subtext={globalKpis.peakComplaintDay ? formatHumanDate(globalKpis.peakComplaintDay.key) : '—'}
                       icon={Activity} 
                       accent="bg-indigo-600" 
                     />
                     <MetricCard title="Avg SLA Compliance" value={`${globalKpis.avgSlaCompliance}%`} icon={CheckCircle} accent="bg-emerald-600" />
+                  </div>
+                  
+                  {/* TRENDS TOGGLE */}
+                  <div className="flex items-center justify-between mt-4">
+                    <h3 className="text-base font-bold text-slate-700 dark:text-slate-200">Trends Filter</h3>
+                    <div className="inline-flex bg-slate-100 dark:bg-slate-800 p-1 rounded-full border border-slate-200 dark:border-slate-700">
+                      {['day', 'week', 'month'].map((g) => {
+                        const label = g === 'day' ? 'Daily' : g.charAt(0).toUpperCase() + g.slice(1) + 'ly';
+                        return (
+                          <button
+                            key={g}
+                            onClick={() => setTrendsGranularity(g)}
+                            className={`px-4 py-1.5 text-xs font-bold rounded-full transition-all ${
+                              trendsGranularity === g
+                                ? 'bg-indigo-600 text-white shadow-md'
+                                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
                   <Card title={`Complaint Volume Trend (${granularityLabel})`} icon={TrendingUp}>
@@ -1669,7 +1704,7 @@ export default function App() {
                       infoText="Total complaints containing severe health-hazard keywords (Cockroach, Rodent, Pest)." 
                     />
                     <MetricCard title="Top Bottleneck Station" value={globalKpis.topBottleneckStation} icon={LucideMap} accent="bg-sky-600" />
-                    <MetricCard title="Worst Coach Class" value={globalKpis.worstCoachClass} icon={TrainFront} accent="bg-purple-600" />
+                    <MetricCard title="Worst Coach Class" value={globalKpis.worstCoachClass} subtext={globalKpis.worstCoachCount} icon={TrainFront} accent="bg-purple-600" />
                   </div>
 
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
