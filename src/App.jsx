@@ -6,7 +6,7 @@ import {
 import { 
   LayoutDashboard, TrainFront, Clock, MessageSquareWarning, 
   Sparkles, Menu, X, AlertTriangle, CheckCircle, Upload, 
-  Calendar, Trash2, Cpu, FileSpreadsheet, Bug, BarChart3, Map as MapIcon, Filter, Bot, Loader2
+  Calendar, Trash2, Cpu, FileSpreadsheet, Bug, BarChart3, Map as LucideMap, Filter, Bot, Loader2
 } from 'lucide-react';
 
 const COLORS = ['#3b82f6', '#8b5cf6', '#0ea5e9', '#f59e0b', '#ef4444', '#10b981', '#6366f1', '#f43f5e', '#a855f7', '#ec4899'];
@@ -78,7 +78,7 @@ const navItemsList = [
   { id: 'overview', label: 'Overview & Analytics', icon: LayoutDashboard },
   { id: 'category', label: 'Category & Pest Control', icon: Sparkles },
   { id: 'trains', label: 'Train Analysis Matrix', icon: TrainFront },
-  { id: 'geo', label: 'Geo & Coach Types', icon: MapIcon },
+  { id: 'geo', label: 'Geo & Coach Types', icon: LucideMap },
   { id: 'operations', label: 'Shifts & Feedback', icon: Clock },
 ];
 
@@ -119,10 +119,10 @@ export default function App() {
 
   const showToast = (msg) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(''), 6000);
+    setTimeout(() => setToastMessage(''), 8000);
   };
 
-  // 1. Inject Dependencies Dynamically (Avoids build errors in specific environments)
+  // 1. Inject Dependencies Dynamically
   useEffect(() => {
     const loadDependencies = async () => {
       try {
@@ -148,7 +148,6 @@ export default function App() {
         const client = window.supabase.createClient(url, key);
         setSupabaseClient(client);
         
-        // Fetch Cloud Data immediately after initialization
         fetchCloudData(client);
       } catch (err) {
         console.error("Dependency loading failed", err);
@@ -166,10 +165,11 @@ export default function App() {
       
       if (error) {
         if (error.code === 'PGRST116') {
-          // If record ID 1 doesn't exist, it means the database is truly fresh
           setLastSync("Cloud Initialized (Empty)");
+        } else if (error.code === '42501') {
+          setLastSync("Read Blocked (RLS)");
         } else {
-          setLastSync("Connection Error");
+          setLastSync("Cloud Offline");
         }
         setIsLoading(false);
         return;
@@ -179,7 +179,6 @@ export default function App() {
         setDbData(data.json_data);
         setLastSync(new Date(data.last_updated || Date.now()).toLocaleTimeString());
         
-        // Adjust default filters to match the loaded data range
         if (data.json_data.records.length > 0) {
             const sortedDates = [...data.json_data.records].map(r => r.date).sort();
             setFromDate(sortedDates[0]);
@@ -343,9 +342,9 @@ export default function App() {
             return (idx !== undefined && row[idx] !== undefined) ? row[idx] : null;
         };
 
-        const existingMap = new window.Map();
+        const idMap = new window.Map(); 
         const baseRecords = dbData.records || [];
-        baseRecords.forEach(r => existingMap.set(String(r.id), r));
+        baseRecords.forEach(r => idMap.set(String(r.id), r));
 
         let newRecordsAdded = 0;
 
@@ -359,7 +358,7 @@ export default function App() {
                 if (!refNo || !createdOn) continue; 
 
                 const recordId = String(refNo).trim();
-                if (existingMap.has(recordId)) continue;
+                if (idMap.has(recordId)) continue;
 
                 const parsedObj = parseRawDate(createdOn);
                 if (!parsedObj) continue;
@@ -378,7 +377,7 @@ export default function App() {
                 const matchTrain = rawTrain.match(/\b\d{4,5}\b/);
                 const trainNo = matchTrain ? matchTrain[0] : (trainStation ? String(trainStation) : 'Unknown');
 
-                existingMap.set(recordId, {
+                idMap.set(recordId, {
                     id: recordId,
                     date: parsedObj.date,
                     month: parsedObj.month,
@@ -399,24 +398,32 @@ export default function App() {
         }
 
         if (newRecordsAdded > 0) {
-            const newData = { records: Array.from(existingMap.values()) };
+            const newData = { records: Array.from(idMap.values()) };
             
-            // Critical: Update Cloud BEFORE local state to ensure persistence
-            const { error } = await supabaseClient.from('railmadad_sync').upsert({ 
-                id: 1, 
-                json_data: newData, 
-                last_updated: new Date().toISOString() 
-            }, { onConflict: 'id' });
+            // OPTIMISTIC LOCAL UPDATE
+            setDbData(newData);
+            setLastSync(new Date().toLocaleTimeString());
+            const sortedDates = [...newData.records].map(r => r.date).sort();
+            setFromDate(sortedDates[0]); setToDate(sortedDates[sortedDates.length - 1]);
+            showToast(`✅ Dashboard updated locally with ${newRecordsAdded} new records.`);
 
-            if (error) {
-                console.error("Cloud Upsert failed", error);
-                showToast("⚠️ Cloud Sync failed. Data saved locally only.");
-            } else {
-                setDbData(newData);
-                setLastSync(new Date().toLocaleTimeString());
-                const sortedDates = [...newData.records].map(r => r.date).sort();
-                setFromDate(sortedDates[0]); setToDate(sortedDates[sortedDates.length - 1]);
-                showToast(`✅ Successfully synced ${newRecordsAdded} records.`);
+            // CLOUD SYNC
+            try {
+              const { error } = await supabaseClient.from('railmadad_sync').upsert({ 
+                  id: 1, 
+                  json_data: newData, 
+                  last_updated: new Date().toISOString() 
+              }, { onConflict: 'id' });
+
+              if (error) {
+                  if (error.code === '42501') {
+                      showToast("⚠️ Cloud Sync Failed: Row-Level Security policy prevents saving. Enable 'Public Access' in Supabase to keep data after refresh.");
+                  } else {
+                      showToast("⚠️ Cloud Sync failed. Data is only available in this session.");
+                  }
+              }
+            } catch (syncErr) {
+              console.error("Upsert exception", syncErr);
             }
         } else {
             showToast("No new records detected.");
@@ -448,7 +455,7 @@ export default function App() {
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="flex flex-col items-center">
           <Loader2 className="w-12 h-12 text-indigo-600 animate-spin mb-4" />
-          <p className="text-slate-600 font-bold text-lg animate-pulse tracking-wide uppercase">Connecting to Indian Railways Cloud...</p>
+          <p className="text-slate-600 font-bold text-lg animate-pulse tracking-wide uppercase">Connecting to Rail Cloud...</p>
         </div>
       </div>
     );
@@ -502,7 +509,7 @@ export default function App() {
                 </>
               )}
            </label>
-           <p className="text-[10px] text-slate-400 mt-3 text-center font-medium italic">Status: {String(lastSync)}</p>
+           <p className="text-[10px] text-slate-400 mt-3 text-center font-medium italic">Cloud: {String(lastSync)}</p>
         </div>
 
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
@@ -511,7 +518,7 @@ export default function App() {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
             return (
-              <button key={item.id} onClick={() => { setActiveTab(item.id); setIsMobileMenuOpen(false); }} className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-all ${isActive ? 'bg-indigo-50 text-indigo-700 shadow-sm border border-indigo-100' : 'text-slate-600 hover:bg-slate-50 border border-transparent'}`}>
+              <button key={item.id} onClick={() => { setActiveTab(item.id); setIsMobileMenuOpen(false); }} className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-all ${isActive ? 'bg-indigo-50 text-indigo-700 shadow-sm border border-indigo-100' : 'text-slate-500 hover:bg-slate-50 border border-transparent'}`}>
                 <Icon className={`w-5 h-5 ${isActive ? 'text-indigo-600' : 'text-slate-400'}`} />
                 <span>{String(item.label)}</span>
               </button>
@@ -573,7 +580,7 @@ export default function App() {
                <p className="text-slate-500 mt-4 max-w-md leading-relaxed font-medium">Append your RailMadad Raw CSV export to see real-time analytics.</p>
              </div>
           ) : !kpis || kpis.total === 0 ? (
-             <div className="bg-white p-12 mt-10 rounded-2xl border border-slate-200 flex flex-col items-center justify-center text-center max-w-2xl mx-auto shadow-sm">
+             <div className="bg-white p-12 mt-10 rounded-2xl border border-slate-100 flex flex-col items-center justify-center text-center max-w-2xl mx-auto shadow-sm">
                <Calendar className="w-12 h-12 text-slate-300 mb-4" />
                <h3 className="text-xl font-bold text-slate-800">No Records Found</h3>
                <p className="text-slate-500 mt-2 max-w-sm">No data matches your current date, zone, or status filters.</p>
