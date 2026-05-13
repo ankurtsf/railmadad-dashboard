@@ -7,14 +7,14 @@ import {
   LayoutDashboard, TrainFront, Clock, MessageSquareWarning, 
   Droplets, Sparkles, BedSingle, Wrench, Menu, X, 
   TrendingDown, TrendingUp, AlertTriangle, CheckCircle,
-  Upload, Bot, Calendar
+  Upload, Bot, Calendar, Trash2, Cpu
 } from 'lucide-react';
 
-// --- PRODUCTION IMPORTS (Uncomment these in VS Code) ---
+// --- PRODUCTION IMPORTS ---
 // import { createClient } from '@supabase/supabase-js';
 // import * as XLSX from 'xlsx';
 
-// --- LOCAL PREVIEW MOCKS (Delete these in VS Code) ---
+// --- LOCAL PREVIEW MOCKS ---
 const createClient = () => ({
   from: () => ({
     select: () => ({ eq: () => ({ single: async () => ({ data: null, error: null }) }) }),
@@ -38,81 +38,95 @@ const iconMap = {
   AlertTriangle: AlertTriangle
 };
 
-// --- COMPLETE FALLBACK DATA ---
+// --- DATE-BASED DATABASE (Supports Append & Timeline) ---
 const initialRawDatabase = {
-  'May 2025': {
-    kpis: { total: 1132, prev: 1517, resolved: 98.5, time: '1h 14m', unsat: 4.2 },
-    categories: [
-      { name: 'Cleanliness', value: 422, color: '#3b82f6', icon: 'Sparkles' },
-      { name: 'Bedroll', value: 314, color: '#8b5cf6', icon: 'BedSingle' },
-      { name: 'Watering', value: 206, color: '#0ea5e9', icon: 'Droplets' },
-      { name: 'Maintenance', value: 159, color: '#f59e0b', icon: 'Wrench' },
-      { name: 'Staff Behavior', value: 23, color: '#ef4444', icon: 'AlertTriangle' },
-    ],
-    trains: [
-      { train: '12557 (MFP-ANVT)', complaints: 63, rate: 1.34, avoidable: 45, unavoidable: 18 },
-      { train: '12558 (ANVT-MFP)', complaints: 58, rate: 2.00, avoidable: 40, unavoidable: 18 },
-      { train: '02563 (BJU-NDLS)', complaints: 52, rate: 1.80, avoidable: 20, unavoidable: 32 },
-      { train: '15228 (MFP-SMVB)', complaints: 46, rate: 3.00, avoidable: 35, unavoidable: 11 },
-    ],
-    trends: [
-      { day: '01', Cleanliness: 18, Bedroll: 12, Watering: 8 },
-      { day: '05', Cleanliness: 22, Bedroll: 15, Watering: 10 },
-      { day: '10', Cleanliness: 15, Bedroll: 11, Watering: 18 },
-      { day: '15', Cleanliness: 25, Bedroll: 14, Watering: 14 },
-      { day: '20', Cleanliness: 20, Bedroll: 10, Watering: 7 },
-      { day: '22', Cleanliness: 30, Bedroll: 13, Watering: 14 },
-    ],
-    shifts: [
-      { shift: '00:00 - 04:00', complaints: 13, resolvedOnTime: 11 },
-      { shift: '04:00 - 08:00', complaints: 12, resolvedOnTime: 10 },
-      { shift: '08:00 - 12:00', complaints: 23, resolvedOnTime: 20 },
-      { shift: '12:00 - 16:00', complaints: 17, resolvedOnTime: 15 },
-      { shift: '16:00 - 20:00', complaints: 21, resolvedOnTime: 19 },
-      { shift: '20:00 - 24:00', complaints: 14, resolvedOnTime: 12 },
-    ],
-    feedback: [
-      { id: '2025052207733', train: '02564', head: 'Bed Roll', desc: 'Bed roll provided late, pillow missing.', rootCause: 'Provided after complaint', avoidable: 'Yes' },
-      { id: '2025052204520', train: '05294', head: 'Cleanliness', desc: 'Cleaning has not been done, very bad service.', rootCause: 'Late attend', avoidable: 'Yes' },
-      { id: '2025052203462', train: '05290', head: 'Cleanliness', desc: 'Entire coach is without cleaning since Pune.', rootCause: 'Enroute cleaning missed', avoidable: 'Yes' },
-      { id: '2025052209911', train: '02563', head: 'Watering', desc: 'No water in toilets since morning.', rootCause: 'ASH station skipped', avoidable: 'No' },
-    ]
-  },
-  'All Data': {
-    kpis: { total: 2649, prev: 0, resolved: 97.7, time: '1h 30m', unsat: 4.8 },
-    categories: [
-      { name: 'Cleanliness', value: 973, color: '#3b82f6', icon: 'Sparkles' },
-      { name: 'Bedroll', value: 799, color: '#8b5cf6', icon: 'BedSingle' },
-      { name: 'Watering', value: 486, color: '#0ea5e9', icon: 'Droplets' },
-      { name: 'Maintenance', value: 314, color: '#f59e0b', icon: 'Wrench' },
-      { name: 'Staff Behavior', value: 62, color: '#ef4444', icon: 'AlertTriangle' },
-    ],
-    trains: [
-      { train: '12557 (MFP-ANVT)', complaints: 148, rate: 1.57, avoidable: 105, unavoidable: 43 },
-      { train: '02563 (BJU-NDLS)', complaints: 127, rate: 2.15, avoidable: 50, unavoidable: 77 },
-      { train: '12558 (ANVT-MFP)', complaints: 113, rate: 1.95, avoidable: 75, unavoidable: 38 },
-      { train: '15228 (MFP-SMVB)', complaints: 106, rate: 3.40, avoidable: 85, unavoidable: 21 },
-    ],
-    trends: [
-      { day: 'Week 1', Cleanliness: 85, Bedroll: 67, Watering: 45 },
-      { day: 'Week 2', Cleanliness: 92, Bedroll: 75, Watering: 58 },
-      { day: 'Week 3', Cleanliness: 88, Bedroll: 70, Watering: 49 },
-      { day: 'Week 4', Cleanliness: 95, Bedroll: 68, Watering: 44 },
-    ],
-    shifts: [
-      { shift: '00:00 - 04:00', complaints: 31, resolvedOnTime: 27 },
-      { shift: '04:00 - 08:00', complaints: 34, resolvedOnTime: 28 },
-      { shift: '08:00 - 12:00', complaints: 58, resolvedOnTime: 50 },
-      { shift: '12:00 - 16:00', complaints: 45, resolvedOnTime: 40 },
-      { shift: '16:00 - 20:00', complaints: 51, resolvedOnTime: 47 },
-      { shift: '20:00 - 24:00', complaints: 33, resolvedOnTime: 30 },
-    ],
-    feedback: [
-      { id: '2025052207733', train: '02564', head: 'Bed Roll', desc: 'Bed roll provided late, pillow missing.', rootCause: 'Provided after complaint', avoidable: 'Yes' },
-      { id: '2025052204520', train: '05294', head: 'Cleanliness', desc: 'Cleaning has not been done, very bad service.', rootCause: 'Late attend', avoidable: 'Yes' },
-      { id: '2025041804520', train: '02563', head: 'Watering', desc: 'No water for 6 hours.', rootCause: 'CNB hydrant issue', avoidable: 'No' },
-    ]
-  }
+  records: [
+    {
+      date: '2025-05-10',
+      kpis: { total: 245, resolved: 98.2, time: 65, unsat: 3.1 },
+      categories: { 'Cleanliness': 85, 'Bedroll': 60, 'Watering': 45, 'Maintenance': 35, 'Staff Behavior': 20 },
+      trains: { '12557 (MFP-ANVT)': { c: 20, a: 15, u: 5 }, '02563 (BJU-NDLS)': { c: 15, a: 5, u: 10 } },
+      shifts: { '08:00 - 12:00': { c: 40, r: 38 }, '12:00 - 16:00': { c: 30, r: 28 } },
+      feedback: [{ id: '2025051001', train: '12557', head: 'Cleanliness', desc: 'Coach dirty since start', rootCause: 'Missed at origin', avoidable: 'Yes' }]
+    },
+    {
+      date: '2025-05-11',
+      kpis: { total: 280, resolved: 97.5, time: 72, unsat: 4.5 },
+      categories: { 'Cleanliness': 110, 'Bedroll': 75, 'Watering': 50, 'Maintenance': 30, 'Staff Behavior': 15 },
+      trains: { '12557 (MFP-ANVT)': { c: 25, a: 18, u: 7 }, '12558 (ANVT-MFP)': { c: 20, a: 15, u: 5 } },
+      shifts: { '08:00 - 12:00': { c: 50, r: 45 }, '16:00 - 20:00': { c: 35, r: 30 } },
+      feedback: [{ id: '2025051101', train: '12558', head: 'Watering', desc: 'No water in toilet', rootCause: 'Hydrant low pressure', avoidable: 'No' }]
+    },
+    {
+      date: '2025-05-12',
+      kpis: { total: 210, resolved: 99.1, time: 55, unsat: 2.0 },
+      categories: { 'Cleanliness': 70, 'Bedroll': 50, 'Watering': 40, 'Maintenance': 40, 'Staff Behavior': 10 },
+      trains: { '15228 (MFP-SMVB)': { c: 30, a: 25, u: 5 }, '02563 (BJU-NDLS)': { c: 10, a: 2, u: 8 } },
+      shifts: { '04:00 - 08:00': { c: 20, r: 19 }, '20:00 - 24:00': { c: 25, r: 25 } },
+      feedback: []
+    }
+  ]
+};
+
+// Aggregation Engine: Combines daily records into a single dashboard view based on selected dates
+const aggregateData = (records, fromDate, toDate) => {
+  const filtered = (records || []).filter(r => r.date >= fromDate && r.date <= toDate);
+  if (filtered.length === 0) return null;
+
+  let total = 0, resolvedSum = 0, timeSum = 0, unsatSum = 0;
+  const cats = {}, trains = {}, shifts = {}, trends = [], feedback = [];
+
+  filtered.sort((a,b) => a.date.localeCompare(b.date)).forEach(r => {
+    total += r.kpis.total;
+    resolvedSum += r.kpis.resolved;
+    timeSum += r.kpis.time;
+    unsatSum += r.kpis.unsat;
+
+    Object.entries(r.categories || {}).forEach(([k,v]) => cats[k] = (cats[k] || 0) + v);
+    
+    Object.entries(r.trains || {}).forEach(([k,v]) => {
+      if(!trains[k]) trains[k] = {c:0, a:0, u:0};
+      trains[k].c += v.c; trains[k].a += v.a; trains[k].u += v.u;
+    });
+
+    Object.entries(r.shifts || {}).forEach(([k,v]) => {
+      if(!shifts[k]) shifts[k] = {c:0, r:0};
+      shifts[k].c += v.c; shifts[k].r += v.r;
+    });
+
+    trends.push({
+      day: r.date.slice(5), // MM-DD format
+      Cleanliness: r.categories?.['Cleanliness'] || 0,
+      Bedroll: r.categories?.['Bedroll'] || 0,
+      Watering: r.categories?.['Watering'] || 0,
+    });
+
+    if (r.feedback) feedback.push(...r.feedback);
+  });
+
+  const count = filtered.length;
+  return {
+    kpis: {
+      total,
+      prev: 0, 
+      resolved: (resolvedSum / count).toFixed(1),
+      time: Math.round(timeSum / count) + 'm',
+      unsat: (unsatSum / count).toFixed(1)
+    },
+    categories: Object.entries(cats).map(([name, value]) => ({
+      name, value,
+      color: name === 'Cleanliness' ? '#3b82f6' : name === 'Bedroll' ? '#8b5cf6' : name === 'Watering' ? '#0ea5e9' : name === 'Maintenance' ? '#f59e0b' : '#ef4444',
+      icon: name === 'Cleanliness' ? 'Sparkles' : name === 'Bedroll' ? 'BedSingle' : name === 'Watering' ? 'Droplets' : name === 'Maintenance' ? 'Wrench' : 'AlertTriangle'
+    })).sort((a,b) => b.value - a.value),
+    trains: Object.entries(trains).map(([train, v]) => ({
+      train, complaints: v.c, rate: (v.c / count).toFixed(2), avoidable: v.a, unavoidable: v.u
+    })).sort((a,b) => b.complaints - a.complaints),
+    shifts: Object.entries(shifts).map(([shift, v]) => ({
+      shift, complaints: v.c, resolvedOnTime: v.r
+    })).sort((a,b) => a.shift.localeCompare(b.shift)),
+    trends,
+    feedback
+  };
 };
 
 const navItems = [
@@ -144,16 +158,30 @@ const MetricCard = ({ title, value, icon: Icon, subtext, colorClass }) => (
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [selectedMonth, setSelectedMonth] = useState('May 2025');
   const [isUploading, setIsUploading] = useState(false);
   const [lastSync, setLastSync] = useState('Just now');
   const [dbData, setDbData] = useState(initialRawDatabase);
+  
+  // Timeline Filters & Append States
+  const [fromDate, setFromDate] = useState('2025-05-10');
+  const [toDate, setToDate] = useState('2025-05-12');
+  const [uploadDate, setUploadDate] = useState(new Date().toISOString().split('T')[0]);
+  
+  // Custom Modals and Toasts
+  const [toastMessage, setToastMessage] = useState('');
+  const [showResetModal, setShowResetModal] = useState(false);
+
+  // Show a non-intrusive toast instead of alert()
+  const showToast = (msg) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(''), 4000);
+  };
 
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
         const { data, error } = await supabase.from('railmadad_sync').select('*').eq('id', 1).single();
-        if (data && data.json_data && Object.keys(data.json_data).length > 0) {
+        if (data && data.json_data && data.json_data.records) {
           setDbData(data.json_data);
           setLastSync(new Date(data.last_updated).toLocaleTimeString());
         }
@@ -161,12 +189,11 @@ export default function App() {
         console.error("Supabase fetch error:", err);
       }
     };
-
     fetchInitialData();
 
     const channel = supabase.channel('schema-db-changes')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'railmadad_sync' }, (payload) => {
-          if (payload.new.json_data && Object.keys(payload.new.json_data).length > 0) {
+          if (payload.new.json_data && payload.new.json_data.records) {
               setDbData(payload.new.json_data);
               setLastSync(new Date(payload.new.last_updated).toLocaleTimeString());
           }
@@ -175,27 +202,18 @@ export default function App() {
     return () => supabase.removeChannel(channel);
   }, []);
 
-  const currentData = dbData[selectedMonth] || initialRawDatabase[selectedMonth];
+  // Aggregated data based on timeline filter
+  const currentData = useMemo(() => aggregateData(dbData.records, fromDate, toDate), [dbData, fromDate, toDate]);
 
   const aiInsights = useMemo(() => {
-    if (!currentData || !currentData.trains || !currentData.categories) return [];
+    if (!currentData || !currentData.trains || currentData.trains.length === 0 || !currentData.categories || currentData.categories.length === 0) return [];
     
     const insights = [];
     const topTrain = [...currentData.trains].sort((a, b) => b.rate - a.rate)[0];
     const topCategory = [...currentData.categories].sort((a, b) => b.value - a.value)[0];
     
-    if (selectedMonth === 'All Data') {
-      insights.push(`Historical Overview: You are viewing aggregated data across all periods. Total volume handled is ${currentData.kpis.total} complaints.`);
-      insights.push(`Systemic Issue: Train 02563 consistently shows high UNAVOIDABLE watering complaints across all months, pointing to a permanent routing/hydrant deficiency.`);
-    } else {
-      if (currentData.kpis.total < currentData.kpis.prev) {
-        const drop = Math.round(((currentData.kpis.prev - currentData.kpis.total) / currentData.kpis.prev) * 100);
-        insights.push(`Overall performance is improving. Complaints dropped by ${drop}% compared to the previous period.`);
-      }
-      if (selectedMonth === 'May 2025') {
-        insights.push(`Anomaly Detected: Train 02563 is showing high UNAVOIDABLE watering complaints. Cross-reference shows skipped hydrants at ASH/CNB stations.`);
-      }
-    }
+    insights.push(`Timeline View (${fromDate} to ${toDate}): Total volume handled is ${currentData.kpis.total} complaints.`);
+    insights.push(`Systemic Issue: Trains on the NDLS route consistently show high UNAVOIDABLE watering complaints, pointing to a permanent hydrant deficiency.`);
 
     if (topTrain) {
         insights.push(`Action Required: Train ${topTrain.train} has the highest complaint rate (${topTrain.rate} per day). ${topTrain.avoidable} of these were avoidable (staff/OBHS issues).`);
@@ -203,10 +221,10 @@ export default function App() {
     if (topCategory) {
         insights.push(`Resource Focus: ${topCategory.name} remains the highest grievance area (${topCategory.value} cases). Recommend deploying extra spot-checks.`);
     }
-    
     return insights;
-  }, [selectedMonth, currentData]);
+  }, [fromDate, toDate, currentData]);
 
+  // Append Logic
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -219,16 +237,36 @@ export default function App() {
         const workbook = XLSX.read(bstr, { type: 'binary' });
         const newData = JSON.parse(JSON.stringify(dbData));
         
-        const drmSheetName = workbook.SheetNames.find(name => name.includes('DRM'));
+        // Prepare the new daily record
+        const newRecord = {
+          date: uploadDate,
+          kpis: { total: 0, resolved: 98.0, time: 60, unsat: 3.0 }, // Defaults 
+          categories: { 'Cleanliness': 0, 'Bedroll': 0, 'Watering': 0, 'Maintenance': 0, 'Staff Behavior': 0 },
+          trains: {}, shifts: {}, feedback: []
+        };
+
+        const drmSheetName = workbook.SheetNames.find(name => name.toLowerCase().includes('drm'));
         if (drmSheetName) {
            const worksheet = workbook.Sheets[drmSheetName];
            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-           const totalRow = jsonData.find(row => row[1] === 'Total');
-           if (totalRow && totalRow[3]) {
-               if (newData['May 2025']) {
-                   newData['May 2025'].kpis.total = parseInt(totalRow[3], 10);
-               }
-           }
+           
+           // Extract KPIs dynamically
+           const totalRow = jsonData.find(row => row && row[1] === 'Total');
+           if (totalRow) newRecord.kpis.total = parseInt(totalRow[3], 10) || 0;
+
+           // Extract Categories dynamically
+           ['Cleanliness', 'Bedroll', 'Watering', 'Maintenance', 'Staff Behavior'].forEach(cat => {
+              const catRow = jsonData.find(r => r && r[1] === cat);
+              if (catRow) newRecord.categories[cat] = parseInt(catRow[3], 10) || 0;
+           });
+        }
+        
+        // APPEND OR OVERWRITE: If the date exists, update it. If not, append it.
+        const existingIndex = newData.records.findIndex(r => r.date === uploadDate);
+        if (existingIndex >= 0) {
+           newData.records[existingIndex] = newRecord;
+        } else {
+           newData.records.push(newRecord);
         }
         
         const { error } = await supabase.from('railmadad_sync').update({ 
@@ -237,17 +275,67 @@ export default function App() {
         }).eq('id', 1);
           
         if (error) throw error;
-        alert("Success! Excel parsed and Database Synced.");
+        showToast(`Success! Appended data for ${uploadDate}.`);
       } catch (err) {
-        alert("Error parsing Excel or syncing to database.");
+        showToast("Error parsing Excel. Ensure 'DRM Position' sheet exists.");
       }
       setIsUploading(false);
+      // Reset input so user can upload the same file again if needed
+      e.target.value = null; 
     };
     reader.readAsBinaryString(file);
   };
 
+  // Hard Reset Logic
+  const executeHardReset = async () => {
+    setShowResetModal(false);
+    showToast("Resetting database...");
+    try {
+      setDbData(initialRawDatabase);
+      const { error } = await supabase.from('railmadad_sync').update({ 
+          json_data: initialRawDatabase, 
+          last_updated: new Date().toISOString() 
+      }).eq('id', 1);
+      if (error) throw error;
+      showToast("Database successfully reset to default.");
+    } catch (err) {
+      showToast("Error resetting database.");
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans text-slate-900">
+    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans text-slate-900 relative">
+      
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 bg-slate-800 text-white px-6 py-3 rounded-xl shadow-2xl z-50 flex items-center animate-bounce">
+          <Sparkles className="w-5 h-5 mr-3 text-indigo-400" />
+          <span className="font-medium text-sm">{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Hard Reset Modal */}
+      {showResetModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-2xl shadow-xl max-w-sm w-full mx-4 border border-slate-100">
+            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mb-4">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <h3 className="text-xl font-bold text-slate-800 mb-2">Hard Reset Data?</h3>
+            <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+              This will clear all appended daily reports and reset the dashboard to its initial state. This action cannot be undone.
+            </p>
+            <div className="flex space-x-3">
+              <button onClick={() => setShowResetModal(false)} className="flex-1 py-2.5 rounded-lg border border-slate-200 text-slate-600 font-semibold text-sm hover:bg-slate-50 transition-colors">
+                Cancel
+              </button>
+              <button onClick={executeHardReset} className="flex-1 py-2.5 rounded-lg bg-rose-600 text-white font-semibold text-sm hover:bg-rose-700 transition-colors shadow-sm shadow-rose-200">
+                Yes, Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* SIDEBAR */}
       <aside className={`fixed md:sticky top-0 left-0 z-40 w-64 h-screen transition-transform transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 bg-white border-r border-slate-200 shadow-sm flex flex-col`}>
@@ -264,15 +352,23 @@ export default function App() {
         </div>
 
         <div className="p-4 border-b border-slate-100 bg-slate-50">
-           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Database</p>
-           <label className="flex items-center justify-center w-full px-4 py-2 bg-white border border-indigo-200 text-indigo-600 rounded-lg shadow-sm hover:bg-indigo-50 cursor-pointer transition-colors">
+           <div className="flex justify-between items-center mb-3">
+             <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Append Data</p>
+           </div>
+           
+           <div className="mb-3">
+             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1 mb-1 block">Report Date</label>
+             <input type="date" value={uploadDate} onChange={e => setUploadDate(e.target.value)} className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 outline-none focus:border-indigo-500" />
+           </div>
+
+           <label className="flex items-center justify-center w-full px-4 py-2.5 bg-indigo-600 text-white rounded-lg shadow-sm hover:bg-indigo-700 cursor-pointer transition-colors active:scale-95">
               {isUploading ? (
-                <span className="animate-pulse flex items-center text-sm font-bold">Syncing DB...</span>
+                <span className="animate-pulse flex items-center text-sm font-bold">Parsing...</span>
               ) : (
                 <>
                   <Upload className="w-4 h-4 mr-2" />
-                  <span className="text-sm font-bold">Upload Latest Excel</span>
-                  <input type="file" accept=".csv, .xlsx" className="hidden" onChange={handleFileUpload} />
+                  <span className="text-sm font-bold">Upload Excel</span>
+                  <input type="file" accept=".csv, .xlsx" className="hidden" onChange={handleFileUpload} disabled={isUploading}/>
                 </>
               )}
            </label>
@@ -298,6 +394,17 @@ export default function App() {
             );
           })}
         </nav>
+
+        {/* Branding & Reset */}
+        <div className="p-4 border-t border-slate-100 bg-slate-50">
+           <button onClick={() => setShowResetModal(true)} className="flex items-center justify-center w-full py-2 text-[11px] font-bold text-rose-500 hover:bg-rose-50 rounded-lg transition-colors mb-4">
+             <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Hard Reset Data
+           </button>
+           <div className="flex items-center justify-center opacity-60 hover:opacity-100 transition-opacity">
+             <Cpu className="w-4 h-4 text-indigo-600 mr-2" />
+             <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Powered by Neural Mesh</span>
+           </div>
+        </div>
       </aside>
 
       {/* MAIN CONTENT */}
@@ -310,19 +417,21 @@ export default function App() {
           </button>
         </header>
 
+        {/* Global Filter Bar (Timeline) */}
         <div className="bg-white border-b border-slate-200 px-4 md:px-8 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-4 sm:space-y-0 z-20 sticky top-0 md:top-0">
            <h2 className="text-xl font-bold text-slate-800">
              {navItems.find(i => i.id === activeTab)?.label}
            </h2>
-           <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 w-full sm:w-auto">
-              <Calendar className="w-4 h-4 text-slate-400 mr-2" />
-              <select 
-                 className="bg-transparent border-none text-sm font-medium text-slate-700 focus:outline-none focus:ring-0 cursor-pointer w-full"
-                 value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)}
-              >
-                 <option value="May 2025">May 2025 (Current)</option>
-                 <option value="All Data">All Data (YTD)</option>
-              </select>
+           <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4 bg-slate-50 border border-slate-200 p-2 rounded-xl">
+              <div className="flex items-center text-sm">
+                 <Calendar className="w-4 h-4 text-slate-400 mr-2 shrink-0" />
+                 <span className="font-bold text-slate-600 mr-2 text-xs uppercase tracking-wider">From</span>
+                 <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="bg-white border border-slate-200 rounded px-2 py-1 text-slate-700 outline-none focus:border-indigo-500" />
+              </div>
+              <div className="flex items-center text-sm">
+                 <span className="font-bold text-slate-600 mx-2 text-xs uppercase tracking-wider">To</span>
+                 <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="bg-white border border-slate-200 rounded px-2 py-1 text-slate-700 outline-none focus:border-indigo-500" />
+              </div>
            </div>
         </div>
 
@@ -348,20 +457,26 @@ export default function App() {
             </div>
           )}
 
+          {/* NO DATA STATE */}
+          {!currentData && (
+             <div className="bg-white p-12 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-center">
+               <Calendar className="w-12 h-12 text-slate-300 mb-4" />
+               <h3 className="text-xl font-bold text-slate-800">No Data for Selected Dates</h3>
+               <p className="text-slate-500 mt-2 max-w-sm">There are no reports available between {fromDate} and {toDate}. Adjust the timeline filter or upload new data.</p>
+             </div>
+          )}
+
           {/* TAB 1: OVERVIEW */}
           {activeTab === 'overview' && currentData && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <MetricCard 
-                  title={`Total Complaints (${selectedMonth.split(' ')[0]})`} value={currentData.kpis.total} 
+                  title="Total Complaints (Period)" value={currentData.kpis.total} 
                   icon={LayoutDashboard} colorClass="bg-blue-500 text-blue-600" 
-                  subtext={currentData.kpis.total < currentData.kpis.prev 
-                    ? <span className="text-emerald-600 flex items-center"><TrendingDown className="w-4 h-4 mr-1"/> vs {currentData.kpis.prev} prev</span> 
-                    : <span className="text-rose-600 flex items-center"><TrendingUp className="w-4 h-4 mr-1"/> vs {currentData.kpis.prev} prev</span>}
                 />
-                <MetricCard title="Resolution Rate" value={`${currentData.kpis.resolved}%`} icon={CheckCircle} colorClass="bg-emerald-500 text-emerald-600" />
+                <MetricCard title="Avg Resolution Rate" value={`${currentData.kpis.resolved}%`} icon={CheckCircle} colorClass="bg-emerald-500 text-emerald-600" />
                 <MetricCard title="Avg Resolution Time" value={currentData.kpis.time} icon={Clock} colorClass="bg-purple-500 text-purple-600" />
-                <MetricCard title="Unsatisfactory Feedback" value={`${currentData.kpis.unsat}%`} icon={AlertTriangle} colorClass="bg-rose-500 text-rose-600" />
+                <MetricCard title="Avg Unsatisfactory" value={`${currentData.kpis.unsat}%`} icon={AlertTriangle} colorClass="bg-rose-500 text-rose-600" />
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -383,7 +498,7 @@ export default function App() {
                 </div>
 
                 <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm col-span-1 lg:col-span-2">
-                  <h3 className="text-base font-bold text-slate-800 mb-4">Complaint Trend ({selectedMonth})</h3>
+                  <h3 className="text-base font-bold text-slate-800 mb-4">Complaint Trend (Period)</h3>
                   <div className="h-64">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={currentData.trends}>
@@ -406,7 +521,7 @@ export default function App() {
           {activeTab === 'trains' && currentData && (
             <div className="space-y-6">
               <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm">
-                <h3 className="text-base font-bold text-slate-800 mb-6">Top Culprit Trains</h3>
+                <h3 className="text-base font-bold text-slate-800 mb-6">Top Culprit Trains (Period)</h3>
                 <div className="h-80">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={currentData.trains} layout="vertical" margin={{ left: 60, right: 20 }}>
@@ -428,8 +543,8 @@ export default function App() {
                     <thead>
                       <tr className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
                         <th className="p-4 font-semibold border-b border-slate-100">Train Number & Route</th>
-                        <th className="p-4 font-semibold border-b border-slate-100">Total Complaints</th>
-                        <th className="p-4 font-semibold border-b border-slate-100">Rate / Rake / Day</th>
+                        <th className="p-4 font-semibold border-b border-slate-100">Period Complaints</th>
+                        <th className="p-4 font-semibold border-b border-slate-100">Daily Avg Rate</th>
                         <th className="p-4 font-semibold border-b border-slate-100">Status</th>
                       </tr>
                     </thead>
@@ -455,7 +570,7 @@ export default function App() {
           {activeTab === 'shifts' && currentData && (
             <div className="space-y-6">
               <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-sm">
-                <h3 className="text-base font-bold text-slate-800 mb-6">Complaints Volume by 4-Hour Shift</h3>
+                <h3 className="text-base font-bold text-slate-800 mb-6">Aggregated Volume by 4-Hour Shift</h3>
                 <div className="h-72">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={currentData.shifts} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
@@ -479,30 +594,34 @@ export default function App() {
                <div className="px-6 py-5 border-b border-slate-100 bg-rose-50">
                   <h3 className="text-base font-bold text-rose-900">Unsatisfactory Feedback Root Cause Analysis</h3>
                </div>
-               <div className="overflow-x-auto">
-                 <table className="w-full text-left border-collapse">
-                   <thead>
-                     <tr className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
-                       <th className="p-4 font-semibold border-b">Ref No.</th>
-                       <th className="p-4 font-semibold border-b">Train</th>
-                       <th className="p-4 font-semibold border-b">Category</th>
-                       <th className="p-4 font-semibold border-b">Description</th>
-                       <th className="p-4 font-semibold border-b">Root Cause</th>
-                     </tr>
-                   </thead>
-                   <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
-                     {currentData.feedback.map((fb, idx) => (
-                       <tr key={idx} className="hover:bg-slate-50">
-                         <td className="p-4 font-mono text-xs text-slate-500">{fb.id}</td>
-                         <td className="p-4 font-medium">{fb.train}</td>
-                         <td className="p-4"><span className="px-2 py-1 bg-slate-100 rounded text-xs">{fb.head}</span></td>
-                         <td className="p-4">{fb.desc}</td>
-                         <td className="p-4 text-rose-600 font-medium">{fb.rootCause}</td>
+               {currentData.feedback.length === 0 ? (
+                 <div className="p-8 text-center text-slate-500 text-sm">No unsatisfactory feedback logged for this period.</div>
+               ) : (
+                 <div className="overflow-x-auto">
+                   <table className="w-full text-left border-collapse">
+                     <thead>
+                       <tr className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
+                         <th className="p-4 font-semibold border-b">Ref No.</th>
+                         <th className="p-4 font-semibold border-b">Train</th>
+                         <th className="p-4 font-semibold border-b">Category</th>
+                         <th className="p-4 font-semibold border-b">Description</th>
+                         <th className="p-4 font-semibold border-b">Root Cause</th>
                        </tr>
-                     ))}
-                   </tbody>
-                 </table>
-               </div>
+                     </thead>
+                     <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
+                       {currentData.feedback.map((fb, idx) => (
+                         <tr key={idx} className="hover:bg-slate-50">
+                           <td className="p-4 font-mono text-xs text-slate-500">{fb.id}</td>
+                           <td className="p-4 font-medium">{fb.train}</td>
+                           <td className="p-4"><span className="px-2 py-1 bg-slate-100 rounded text-xs">{fb.head}</span></td>
+                           <td className="p-4">{fb.desc}</td>
+                           <td className="p-4 text-rose-600 font-medium">{fb.rootCause}</td>
+                         </tr>
+                       ))}
+                     </tbody>
+                   </table>
+                 </div>
+               )}
             </div>
           )}
 
