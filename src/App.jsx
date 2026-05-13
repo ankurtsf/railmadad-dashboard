@@ -24,10 +24,10 @@ const parseRawDate = (raw) => {
     const str = String(raw).trim();
     
     // Ignore floating point reference numbers masquerading as strings
-    if (/^\d+\.\d+$/.test(str) && str.length > 8) return null; 
+    if (/^\d+\.\d+$/.test(str) && str.length > 10) return null; 
 
     // Handle Excel serial number conversion
-    if (!isNaN(raw) && typeof raw === 'number' && raw > 40000 && raw < 60000) {
+    if (!isNaN(Number(raw)) && typeof raw === 'number' && raw > 40000 && raw < 70000) {
         const d = new Date(Math.round((raw - 25569) * 86400 * 1000));
         return {
             date: d.toISOString().split('T')[0],
@@ -70,7 +70,7 @@ const getShift = (hour) => {
  * Converts "1:16" to total minutes (76)
  */
 const parseResolutionTime = (val) => {
-    if (!val || val === "null") return 0;
+    if (!val || String(val) === "null") return 0;
     const match = String(val).match(/(\d+):(\d+)/);
     if (match) return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
     return 0;
@@ -312,6 +312,7 @@ export default function App() {
         const workbook = window.XLSX.read(buffer, { type: 'array' });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
         
+        // Read as matrix to ensure header keys don't get misidentified
         const rawArray = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
         
         if (!rawArray || rawArray.length === 0) throw new Error("File is empty.");
@@ -325,6 +326,7 @@ export default function App() {
             const row = rawArray[i];
             if (!row || !Array.isArray(row)) continue;
             
+            // Aggressive normalization of header strings
             const cleanRow = row.map(c => String(c || "").toLowerCase().replace(/[^a-z0-9]/g, '').trim());
             
             const matchCount = keyHeaders.filter(kh => cleanRow.includes(kh)).length;
@@ -359,49 +361,54 @@ export default function App() {
             const row = rawArray[i];
             if (!row || row.length === 0) continue;
 
-            const refNo = getValue(row, 'complaintrefno') || getValue(row, 'refno');
-            const createdOn = getValue(row, 'createdon');
-            if (!refNo || !createdOn) continue; 
+            // Individual row safety wrapper
+            try {
+                const refNo = getValue(row, 'complaintrefno') || getValue(row, 'refno');
+                const createdOn = getValue(row, 'createdon');
+                if (!refNo || !createdOn) continue; 
 
-            const recordId = String(refNo).trim();
-            if (existingMap.has(recordId)) continue;
+                const recordId = String(refNo).trim();
+                if (existingMap.has(recordId)) continue;
 
-            const parsedObj = parseRawDate(createdOn);
-            if (!parsedObj) continue;
+                const parsedObj = parseRawDate(createdOn);
+                if (!parsedObj) continue;
 
-            const rawCat = getValue(row, 'comptypename') || 'Uncategorized';
-            const rawSubCat = getValue(row, 'subtypename') || '';
-            const rawDesc = getValue(row, 'complaintdesc') || '';
-            
-            const isPest = rawSubCat.toLowerCase().includes('cockroach') || rawSubCat.toLowerCase().includes('rodent') || 
-                           rawSubCat.toLowerCase().includes('rat') || rawSubCat.toLowerCase().includes('pest') ||
-                           rawDesc.toLowerCase().includes('cockroach') || rawDesc.toLowerCase().includes('rodent');
+                const rawCat = getValue(row, 'comptypename') || 'Uncategorized';
+                const rawSubCat = getValue(row, 'subtypename') || '';
+                const rawDesc = getValue(row, 'complaintdesc') || '';
+                
+                const isPest = rawSubCat.toLowerCase().includes('cockroach') || rawSubCat.toLowerCase().includes('rodent') || 
+                               rawSubCat.toLowerCase().includes('rat') || rawSubCat.toLowerCase().includes('pest') ||
+                               rawDesc.toLowerCase().includes('cockroach') || rawDesc.toLowerCase().includes('rodent');
 
-            const trainStation = getValue(row, 'trainstation');
-            const trainReportName = getValue(row, 'trainnameforreport');
-            const rawTrain = String(trainStation || "") + " " + String(trainReportName || "");
-            const matchTrain = rawTrain.match(/\b\d{4,5}\b/);
-            const trainNo = matchTrain ? matchTrain[0] : (trainStation ? String(trainStation) : 'Unknown');
+                const trainStation = getValue(row, 'trainstation');
+                const trainReportName = getValue(row, 'trainnameforreport');
+                const rawTrain = String(trainStation || "") + " " + String(trainReportName || "");
+                const matchTrain = rawTrain.match(/\b\d{4,5}\b/);
+                const trainNo = matchTrain ? matchTrain[0] : (trainStation ? String(trainStation) : 'Unknown');
 
-            const newRecord = {
-                id: recordId,
-                date: parsedObj.date,
-                month: parsedObj.month,
-                shift: parsedObj.shift,
-                category: String(rawCat).trim(), 
-                subType: String(rawSubCat).trim(),
-                isPest: isPest,
-                train: trainNo,
-                rating: String(getValue(row, 'rating') || 'Not Rated').trim(),
-                status: String(getValue(row, 'status') || getValue(row, 'finalstatus') || 'Unknown').trim(),
-                zone: String(getValue(row, 'zonecode') || 'Unknown').trim(),
-                coachType: String(getValue(row, 'coachtype') || 'Unknown').trim(),
-                resTimeMins: parseResolutionTime(getValue(row, 'diff') || getValue(row, 'avgcdiff')),
-                desc: String(rawDesc).substring(0, 200),
-            };
+                const newRecord = {
+                    id: recordId,
+                    date: parsedObj.date,
+                    month: parsedObj.month,
+                    shift: parsedObj.shift,
+                    category: String(rawCat).trim(), 
+                    subType: String(rawSubCat).trim(),
+                    isPest: isPest,
+                    train: trainNo,
+                    rating: String(getValue(row, 'rating') || 'Not Rated').trim(),
+                    status: String(getValue(row, 'status') || getValue(row, 'finalstatus') || 'Unknown').trim(),
+                    zone: String(getValue(row, 'zonecode') || 'Unknown').trim(),
+                    coachType: String(getValue(row, 'coachtype') || 'Unknown').trim(),
+                    resTimeMins: parseResolutionTime(getValue(row, 'diff') || getValue(row, 'avgcdiff')),
+                    desc: String(rawDesc).substring(0, 200),
+                };
 
-            existingMap.set(newRecord.id, newRecord);
-            newRecordsAdded++;
+                existingMap.set(newRecord.id, newRecord);
+                newRecordsAdded++;
+            } catch (rowErr) {
+                console.warn(`Skipping malformed row at index ${i}`, rowErr);
+            }
         }
 
         if (newRecordsAdded > 0) {
@@ -414,19 +421,25 @@ export default function App() {
             setFromDate(sortedDates[0]);
             setToDate(sortedDates[sortedDates.length - 1]);
 
-            showToast(`✅ Added ${newRecordsAdded} records.`);
+            showToast(`✅ Added ${newRecordsAdded} new records.`);
 
-            await supabaseClient.from('railmadad_sync').upsert({ 
+            // Persistent Cloud Sync
+            const { error } = await supabaseClient.from('railmadad_sync').upsert({ 
                 id: 1,
                 json_data: newData, 
                 last_updated: new Date().toISOString() 
-            });
+            }, { onConflict: 'id' });
+
+            if (error) {
+                console.error("Cloud Save failed", error);
+                showToast("⚠️ Cloud Sync failed. Data saved locally only.");
+            }
         } else {
-            showToast("No new records added (Duplicates detected).");
+            showToast("No new records were added (Duplicate file).");
         }
       } catch (err) {
-        console.error("Parse Error:", err);
-        showToast("❌ Unexpected error processing file.");
+        console.error("Critical Parse Error:", err);
+        showToast("❌ Error processing file. Please ensure it's a Raw RailMadad CSV.");
       }
       setIsUploading(false);
       e.target.value = null; 
@@ -584,8 +597,8 @@ export default function App() {
           ) : !kpis || kpis.total === 0 ? (
              <div className="bg-white p-12 mt-10 rounded-2xl border border-slate-200 flex flex-col items-center justify-center text-center max-w-2xl mx-auto shadow-sm">
                <Calendar className="w-12 h-12 text-slate-300 mb-4" />
-               <h3 className="text-xl font-bold text-slate-800">No Records Found</h3>
-               <p className="text-slate-500 mt-2 max-w-sm">No data matches your current filters.</p>
+               <h3 className="text-xl font-bold text-slate-800">No Match</h3>
+               <p className="text-slate-500 mt-2 max-w-sm">Try removing filters or expanding dates.</p>
              </div>
           ) : (
             <>
@@ -672,7 +685,7 @@ export default function App() {
                        <h3 className="text-base font-bold text-rose-900">Pest Control & Rodent Target List</h3>
                     </div>
                     {pestTable.length === 0 ? (
-                      <div className="p-8 text-center text-slate-500 font-medium">No Pest Control complaints identified in this period.</div>
+                      <div className="p-8 text-center text-slate-500 font-medium">No Pest Control complaints identified via description keywords.</div>
                     ) : (
                       <div className="overflow-x-auto max-h-96">
                         <table className="min-w-full text-left border-collapse">
