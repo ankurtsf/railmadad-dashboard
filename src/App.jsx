@@ -20,7 +20,7 @@ const parseRawDate = (raw) => {
     const str = String(raw).trim();
     if (/^\d+\.\d+$/.test(str)) return null; 
 
-    // Excel serial number
+    // Excel serial number conversion
     if (!isNaN(raw) && typeof raw === 'number' && raw > 40000 && raw < 50000) {
         const d = new Date(Math.round((raw - 25569) * 86400 * 1000));
         return {
@@ -30,7 +30,7 @@ const parseRawDate = (raw) => {
         };
     }
 
-    // Match DD-MM-YY HH:MM format
+    // Match DD-MM-YY HH:MM format from raw CSV
     const match = str.match(/^(\d{1,4})[-/.](\d{1,2})[-/.](\d{1,4})(?:\s+(\d{1,2}):(\d{2}))?/);
     if (!match) return null;
 
@@ -62,14 +62,14 @@ const getShift = (hour) => {
 
 // Converts "1:16" to 76 minutes
 const parseResolutionTime = (val) => {
-    if (!val) return null;
+    if (!val) return 0;
     const match = String(val).match(/(\d+):(\d+)/);
     if (match) return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
-    return null;
+    return 0;
 };
 
 const formatMinutesToTime = (totalMins) => {
-    if (!totalMins || isNaN(totalMins)) return "0h 0m";
+    if (!totalMins || isNaN(totalMins) || totalMins <= 0) return "0h 0m";
     const h = Math.floor(totalMins / 60);
     const m = Math.floor(totalMins % 60);
     return `${h}h ${m}m`;
@@ -82,6 +82,20 @@ const navItemsList = [
   { id: 'geo', label: 'Geo & Coach Types', icon: Map },
   { id: 'operations', label: 'Shifts & Feedback', icon: Clock },
 ];
+
+const MetricCard = ({ title, value, icon: Icon, colorClass }) => (
+  <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 flex flex-col">
+    <div className="flex justify-between items-start">
+      <div>
+        <p className="text-sm font-medium text-slate-500 mb-1">{String(title)}</p>
+        <h3 className="text-2xl font-bold text-slate-800">{String(value)}</h3>
+      </div>
+      <div className={`p-3 rounded-lg ${colorClass} bg-opacity-10`}>
+        <Icon className={`w-6 h-6 ${colorClass.replace('bg-', 'text-')}`} />
+      </div>
+    </div>
+  </div>
+);
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
@@ -111,30 +125,35 @@ export default function App() {
   // 1. Inject Dependencies Dynamically (Avoids Canvas Build Errors)
   useEffect(() => {
     const loadDependencies = async () => {
-      if (!window.XLSX) {
-        const script1 = document.createElement('script');
-        script1.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-        document.head.appendChild(script1);
-      }
-      if (!window.supabase) {
-        const script2 = document.createElement('script');
-        script2.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
-        script2.onload = () => {
-           const url = 'https://npfuxifktdmxmzprfcxm.supabase.co';
-           const key = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZnV4aWZrdGRteG16cHJmY3htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2MjMwMDMsImV4cCI6MjA5NDE5OTAwM30.cCheIUxTAQWyoVyIwOLRd5usiyFI-q2GIn3A9NPFL78';
-           setSupabaseClient(window.supabase.createClient(url, key));
-        };
-        document.head.appendChild(script2);
-      } else {
-           const url = 'https://npfuxifktdmxmzprfcxm.supabase.co';
-           const key = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZnV4aWZrdGRteG16cHJmY3htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2MjMwMDMsImV4cCI6MjA5NDE5OTAwM30.cCheIUxTAQWyoVyIwOLRd5usiyFI-q2GIn3A9NPFL78';
-           setSupabaseClient(window.supabase.createClient(url, key));
+      try {
+        if (!window.XLSX) {
+          await new Promise((res) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+            script.onload = res;
+            document.head.appendChild(script);
+          });
+        }
+        if (!window.supabase) {
+          await new Promise((res) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+            script.onload = res;
+            document.head.appendChild(script);
+          });
+        }
+        
+        const url = 'https://npfuxifktdmxmzprfcxm.supabase.co';
+        const key = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZnV4aWZrdGRteG16cHJmY3htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2MjMwMDMsImV4cCI6MjA5NDE5OTAwM30.cCheIUxTAQWyoVyIwOLRd5usiyFI-q2GIn3A9NPFL78';
+        setSupabaseClient(window.supabase.createClient(url, key));
+      } catch (err) {
+        console.error("Dependency loading failed", err);
       }
     };
     loadDependencies();
   }, []);
 
-  // 2. Fetch Data from Supabase
+  // 2. Fetch Data from Supabase (Persistence)
   useEffect(() => {
     if (!supabaseClient) return;
 
@@ -143,26 +162,19 @@ export default function App() {
         const { data, error } = await supabaseClient.from('railmadad_sync').select('*').eq('id', 1).single();
         if (data && data.json_data && data.json_data.records) {
           setDbData(data.json_data);
-          setLastSync(new Date(data.last_updated).toLocaleTimeString());
+          setLastSync(new Date(data.last_updated || Date.now()).toLocaleTimeString());
           if (data.json_data.records.length > 0) {
             const sortedDates = [...data.json_data.records].map(r => r.date).sort();
             setFromDate(sortedDates[0]);
             setToDate(sortedDates[sortedDates.length - 1]);
           }
         }
-      } catch (err) { console.error("Fetch Error:", err); }
+      } catch (err) { 
+        console.error("Fetch Error:", err); 
+        setLastSync("No data found in cloud.");
+      }
     };
-    
     fetchInitialData();
-
-    const channel = supabaseClient.channel('schema-db-changes').on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'railmadad_sync' }, (payload) => {
-        if (payload.new.json_data && payload.new.json_data.records) {
-            setDbData(payload.new.json_data);
-            setLastSync(new Date(payload.new.last_updated).toLocaleTimeString());
-        }
-    }).subscribe();
-
-    return () => supabaseClient.removeChannel(channel);
   }, [supabaseClient]);
 
   // --- CORE RAW DATA AGGREGATOR ---
@@ -180,7 +192,7 @@ export default function App() {
         return true;
     });
     
-    // Build Available Filters
+    // Build Available Filters from ALL records
     const zoneSet = new Set();
     const statusSet = new Set();
     (dbData.records || []).forEach(r => {
@@ -208,7 +220,7 @@ export default function App() {
         if ((r.rating||'').toLowerCase().includes('unsatisfactory')) unsatCount++; 
         if ((r.status||'').toLowerCase().includes('closed')) resolvedCount++;
         
-        if (r.resTimeMins > 0) {
+        if (r.resTimeMins && r.resTimeMins > 0) {
             totalResTime += r.resTimeMins;
             recordsWithResTime++;
         }
@@ -247,8 +259,8 @@ export default function App() {
 
     const kpis = {
        total: validRecords.length,
-       resolved: validRecords.length > 0 ? ((resolvedCount / validRecords.length) * 100).toFixed(1) : 0,
-       unsat: validRecords.length > 0 ? ((unsatCount / validRecords.length) * 100).toFixed(1) : 0,
+       resolved: validRecords.length > 0 ? ((resolvedCount / validRecords.length) * 100).toFixed(1) : "0",
+       unsat: validRecords.length > 0 ? ((unsatCount / validRecords.length) * 100).toFixed(1) : "0",
        avgResTime: recordsWithResTime > 0 ? formatMinutesToTime(totalResTime / recordsWithResTime) : "N/A",
     };
 
@@ -275,11 +287,11 @@ export default function App() {
     };
   }, [dbData, fromDate, toDate, selectedZone, selectedStatus]);
 
-  // --- STRICT & AGGRESSIVE RAW DATA PARSER ---
+  // --- STRICT RAW DATA PARSER ---
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file || !window.XLSX || !supabaseClient) {
-        showToast("Systems are still loading. Please wait a second and try again.");
+        showToast("Parser engines are still loading. Please wait a second and try again.");
         return;
     }
 
@@ -310,7 +322,7 @@ export default function App() {
         }
 
         if (headerRowIdx === -1) {
-            showToast("Warning: Could not find 'complaintRefNo' or 'createdOn'. Ensure it is a Raw RailMadad Export.");
+            showToast("Warning: Could not find 'complaintRefNo' or 'createdOn'. Ensure this is a Raw RailMadad Export.");
             setIsUploading(false);
             e.target.value = null; 
             return;
@@ -326,7 +338,6 @@ export default function App() {
         const descIdx = headers.indexOf('complaintdesc');
         const remarksIdx = headers.indexOf('remarks');
         
-        // New Analytics Columns
         const statusIdx = headers.indexOf('status') !== -1 ? headers.indexOf('status') : headers.indexOf('finalstatus');
         const zoneIdx = headers.indexOf('zonecode');
         const coachTypeIdx = headers.indexOf('coachtype');
@@ -334,7 +345,7 @@ export default function App() {
         const channelIdx = headers.indexOf('channeltype') !== -1 ? headers.indexOf('channeltype') : headers.indexOf('complaintmode');
 
         const existingMap = new Map();
-        (dbData.records || []).forEach(r => existingMap.set(r.id, r));
+        (dbData.records || []).forEach(r => existingMap.set(String(r.id), r));
 
         let newRecordsAdded = 0;
         let duplicatesSkipped = 0;
@@ -395,7 +406,7 @@ export default function App() {
         if (newRecordsAdded > 0) {
             const newData = { records: Array.from(existingMap.values()) };
 
-            // Optimistic Update
+            // Optimistic Local Update
             setDbData(newData);
             setLastSync(new Date().toLocaleTimeString());
             
@@ -403,9 +414,9 @@ export default function App() {
             setFromDate(sortedDates[0]);
             setToDate(sortedDates[sortedDates.length - 1]);
 
-            showToast(`Success! Appended ${newRecordsAdded} new raw complaints. Skipped ${duplicatesSkipped} exact duplicates.`);
+            showToast(`Success! Added ${newRecordsAdded} records. Skipped ${duplicatesSkipped} duplicates.`);
 
-            // Push to Supabase using UPSERT to prevent row missing errors
+            // Push to Supabase Cloud Storage
             const { error } = await supabaseClient.from('railmadad_sync').upsert({ 
                 id: 1,
                 json_data: newData, 
@@ -414,13 +425,12 @@ export default function App() {
 
             if (error) {
                 console.error("Supabase Save Error:", error);
-                showToast("⚠️ Local update succeeded, but Cloud Save failed. Check Supabase RLS policies!");
+                showToast("⚠️ Local update succeeded, but Cloud Save failed.");
             }
-
         } else if (duplicatesSkipped > 0) {
-            showToast(`Upload complete. No new data found. Skipped ${duplicatesSkipped} exact duplicates.`);
+            showToast(`Upload complete. No new data found.`);
         } else {
-            showToast("Warning: Uploaded file contained no valid date entries.");
+            showToast("Warning: No valid records detected in the file.");
         }
       } catch (err) {
         console.error("Parse Error:", err);
@@ -443,17 +453,15 @@ export default function App() {
     setSelectedZone('All'); setSelectedStatus('All');
 
     try {
-      const { error } = await supabaseClient.from('railmadad_sync').upsert({ id: 1, json_data: initialRawDatabase, last_updated: new Date().toISOString() }, { onConflict: 'id' });
-      if (error) throw error;
+      await supabaseClient.from('railmadad_sync').upsert({ id: 1, json_data: initialRawDatabase, last_updated: new Date().toISOString() }, { onConflict: 'id' });
       showToast("Database successfully wiped clean.");
     } catch (err) {
-      showToast("⚠️ Local wipe succeeded, but Cloud Sync failed.");
+      showToast("⚠️ Cloud Sync failed during reset.");
     }
   };
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans text-slate-900 relative">
-      {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 bg-slate-800 text-white px-6 py-4 rounded-xl shadow-2xl z-50 flex items-center animate-bounce border border-slate-700">
           <Sparkles className="w-5 h-5 mr-3 text-indigo-400" />
@@ -461,7 +469,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Hard Reset Modal */}
       {showResetModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white p-6 rounded-2xl shadow-xl max-w-sm w-full border border-slate-100 transform transition-all">
@@ -470,7 +477,7 @@ export default function App() {
             </div>
             <h3 className="text-xl font-bold text-slate-800 mb-2">Wipe Database?</h3>
             <p className="text-sm text-slate-500 mb-6 leading-relaxed">
-              This will permanently delete all raw data appended to the dashboard. It will return to a completely empty state.
+              This will permanently delete all raw data. The dashboard will return to a completely empty state.
             </p>
             <div className="flex space-x-3">
               <button onClick={() => setShowResetModal(false)} className="flex-1 py-2.5 rounded-lg border border-slate-200 text-slate-600 font-semibold text-sm hover:bg-slate-50 transition-colors">Cancel</button>
@@ -480,14 +487,13 @@ export default function App() {
         </div>
       )}
       
-      {/* SIDEBAR */}
       <aside className={`fixed md:sticky top-0 left-0 z-40 w-64 h-screen transition-transform transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 bg-white border-r border-slate-200 shadow-sm flex flex-col`}>
         <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-indigo-700">
           <div>
             <h1 className="text-xl font-bold text-white tracking-tight flex items-center">
               <TrainFront className="w-5 h-5 mr-2" /> RailMadad
             </h1>
-            <p className="text-[10px] font-bold text-indigo-200 uppercase tracking-widest mt-1">Raw Data Engine</p>
+            <p className="text-[10px] font-bold text-indigo-200 uppercase tracking-widest mt-1">SEE Division Engine</p>
           </div>
           <button className="md:hidden text-white" onClick={() => setIsMobileMenuOpen(false)}><X className="w-6 h-6" /></button>
         </div>
@@ -495,7 +501,7 @@ export default function App() {
         <div className="p-5 border-b border-slate-100 bg-slate-50">
            <label className="flex items-center justify-center w-full px-4 py-3 bg-indigo-600 text-white rounded-lg shadow-sm hover:bg-indigo-700 cursor-pointer transition-colors active:scale-95">
               {isUploading ? (
-                <span className="animate-pulse flex items-center text-sm font-bold">Parsing Raw Data...</span>
+                <span className="animate-pulse flex items-center text-sm font-bold">Processing...</span>
               ) : (
                 <>
                   <Upload className="w-4 h-4 mr-2" />
@@ -504,7 +510,7 @@ export default function App() {
                 </>
               )}
            </label>
-           <p className="text-[10px] text-slate-400 mt-3 text-center font-medium italic">Last Sync: {lastSync}</p>
+           <p className="text-[10px] text-slate-400 mt-3 text-center font-medium italic">Last Sync: {String(lastSync)}</p>
         </div>
 
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
@@ -515,7 +521,7 @@ export default function App() {
             return (
               <button key={item.id} onClick={() => { setActiveTab(item.id); setIsMobileMenuOpen(false); }} className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-all ${isActive ? 'bg-indigo-50 text-indigo-700 shadow-sm border border-indigo-100' : 'text-slate-500 hover:bg-slate-50 border border-transparent'}`}>
                 <Icon className={`w-5 h-5 ${isActive ? 'text-indigo-600' : 'text-slate-400'}`} />
-                <span>{item.label}</span>
+                <span>{String(item.label)}</span>
               </button>
             );
           })}
@@ -532,7 +538,6 @@ export default function App() {
         </div>
       </aside>
 
-      {/* MAIN CONTENT AREA */}
       <main className="flex-1 flex flex-col max-w-full overflow-hidden bg-slate-50">
         
         <header className="md:hidden bg-indigo-700 text-white p-4 flex justify-between items-center sticky top-0 z-30 shadow-md">
@@ -541,27 +546,24 @@ export default function App() {
         </header>
 
         <div className="bg-white border-b border-slate-200 px-4 md:px-8 py-4 flex flex-col lg:flex-row justify-between items-start lg:items-center space-y-4 lg:space-y-0 z-20 sticky top-0 md:top-0 shadow-sm">
-           <h2 className="text-xl font-black text-slate-800 tracking-tight">{navItemsList.find(i => i.id === activeTab)?.label}</h2>
+           <h2 className="text-xl font-black text-slate-800 tracking-tight">{String(navItemsList.find(i => i.id === activeTab)?.label)}</h2>
            
            <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-3 sm:space-y-0 sm:space-x-4 bg-slate-50 border border-slate-200 p-2 rounded-xl flex-wrap">
-              {/* Zone Filter */}
               <div className="flex items-center text-sm">
                  <Filter className="w-4 h-4 text-indigo-500 mr-2 shrink-0" />
                  <span className="font-bold text-slate-600 mr-2 text-[10px] uppercase tracking-wider">Zone</span>
                  <select value={selectedZone} onChange={e => setSelectedZone(e.target.value)} className="bg-white border border-slate-200 rounded px-2 py-1 text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer font-medium max-w-[100px]">
                     <option value="All">All</option>
-                    {availableZones.map(z => <option key={z} value={z}>{z}</option>)}
+                    {availableZones.map(z => <option key={z} value={String(z)}>{String(z)}</option>)}
                  </select>
               </div>
-              {/* Status Filter */}
               <div className="flex items-center text-sm">
                  <span className="font-bold text-slate-600 mx-2 text-[10px] uppercase tracking-wider">Status</span>
                  <select value={selectedStatus} onChange={e => setSelectedStatus(e.target.value)} className="bg-white border border-slate-200 rounded px-2 py-1 text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer font-medium max-w-[100px]">
                     <option value="All">All</option>
-                    {availableStatuses.map(s => <option key={s} value={s}>{s}</option>)}
+                    {availableStatuses.map(s => <option key={s} value={String(s)}>{String(s)}</option>)}
                  </select>
               </div>
-              {/* Date Filters */}
               <div className="flex items-center text-sm">
                  <span className="font-bold text-slate-600 mx-2 text-[10px] uppercase tracking-wider">From</span>
                  <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="bg-white border border-slate-200 rounded px-2 py-1 text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer font-medium" />
@@ -575,13 +577,12 @@ export default function App() {
 
         <div className="p-4 md:p-8 flex-1 overflow-y-auto space-y-8">
 
-          {/* EMPTY DATABASE STATE */}
           {(dbData.records || []).length === 0 ? (
              <div className="bg-white p-16 mt-10 rounded-3xl border border-slate-200 flex flex-col items-center justify-center text-center max-w-2xl mx-auto shadow-sm">
                <div className="w-24 h-24 bg-indigo-50 rounded-full flex items-center justify-center mb-6"><FileSpreadsheet className="w-12 h-12 text-indigo-400" /></div>
                <h3 className="text-3xl font-black text-slate-800 tracking-tight">Database is Empty</h3>
                <p className="text-slate-500 mt-4 max-w-md leading-relaxed font-medium">
-                 Click the <b>"Append Raw Export"</b> button in the sidebar to securely upload your raw RailMadad CSV file. Exact duplicates will be skipped automatically based on the Complaint Reference Number.
+                 Click the <b>"Append Raw Export"</b> button in the sidebar to securely upload your raw RailMadad CSV file. Exact duplicates will be skipped automatically.
                </p>
              </div>
           ) : !kpis || kpis.total === 0 ? (
@@ -596,26 +597,13 @@ export default function App() {
               {activeTab === 'overview' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                    <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 border-l-4 border-l-blue-500">
-                        <p className="text-sm font-bold text-slate-500 mb-1 uppercase tracking-wider">Total Filtered Cases</p>
-                        <h3 className="text-4xl font-black text-slate-800 tracking-tight">{kpis.total}</h3>
-                    </div>
-                    <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 border-l-4 border-l-emerald-500">
-                        <p className="text-sm font-bold text-slate-500 mb-1 uppercase tracking-wider">Avg Resolution Time</p>
-                        <h3 className="text-3xl font-black text-emerald-600 tracking-tight">{kpis.avgResTime}</h3>
-                    </div>
-                    <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 border-l-4 border-l-rose-500">
-                        <p className="text-sm font-bold text-slate-500 mb-1 uppercase tracking-wider">Unsatisfactory Rate</p>
-                        <h3 className="text-4xl font-black text-rose-600 tracking-tight">{kpis.unsat}%</h3>
-                    </div>
-                    <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 border-l-4 border-l-indigo-500">
-                        <p className="text-sm font-bold text-slate-500 mb-1 uppercase tracking-wider">Resolution Rate</p>
-                        <h3 className="text-4xl font-black text-indigo-600 tracking-tight">{kpis.resolved}%</h3>
-                    </div>
+                    <MetricCard title="Total Filtered Cases" value={String(kpis.total)} icon={LayoutDashboard} colorClass="bg-blue-600 text-white" />
+                    <MetricCard title="Avg Resolution Time" value={String(kpis.avgResTime)} icon={Clock} colorClass="bg-emerald-600 text-white" />
+                    <MetricCard title="Unsatisfactory Rate" value={`${String(kpis.unsat)}%`} icon={AlertTriangle} colorClass="bg-rose-600 text-white" />
+                    <MetricCard title="Resolution Rate" value={`${String(kpis.resolved)}%`} icon={CheckCircle} colorClass="bg-indigo-600 text-white" />
                   </div>
 
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    {/* MoM Bar Chart */}
                     <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
                       <div className="flex items-center justify-between mb-6">
                          <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Month-over-Month (MoM) Volume Trend</h3>
@@ -634,7 +622,6 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Status Chart */}
                     <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
                         <div className="flex items-center justify-between mb-6">
                            <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Complaint Status Distribution</h3>
@@ -666,16 +653,16 @@ export default function App() {
                         <thead className="sticky top-0 bg-slate-100 z-10 shadow-sm">
                           <tr className="text-slate-500 text-[10px] uppercase tracking-widest">
                             <th className="p-4 font-bold border-b border-slate-200">Raw Category Name</th>
-                            {monthsSorted.map(m => <th key={m} className="p-4 font-bold border-b border-slate-200">{m}</th>)}
+                            {monthsSorted.map(m => <th key={m} className="p-4 font-bold border-b border-slate-200">{String(m)}</th>)}
                             <th className="p-4 font-black border-b border-slate-200 text-slate-800">Total</th>
                           </tr>
                         </thead>
                         <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
                           {catMomData.map((row, idx) => (
                             <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                              <td className="p-4 font-bold text-slate-900 flex items-center"><Sparkles className="w-4 h-4 mr-2 text-indigo-400" />{row.category}</td>
-                              {monthsSorted.map(m => <td key={m} className="p-4 font-medium text-slate-600">{row[m] || '-'}</td>)}
-                              <td className="p-4 font-black text-indigo-600">{row.Total}</td>
+                              <td className="p-4 font-bold text-slate-900 flex items-center"><Sparkles className="w-4 h-4 mr-2 text-indigo-400" />{String(row.category)}</td>
+                              {monthsSorted.map(m => <td key={m} className="p-4 font-medium text-slate-600">{String(row[m] || '-')}</td>)}
+                              <td className="p-4 font-black text-indigo-600">{String(row.Total)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -704,12 +691,12 @@ export default function App() {
                           <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
                             {pestTable.map((row, idx) => (
                               <tr key={idx} className="hover:bg-rose-50/50">
-                                <td className="p-4 font-mono text-[10px] text-slate-400">{row.id}</td>
-                                <td className="p-4 font-medium whitespace-nowrap">{row.date}</td>
-                                <td className="p-4 font-bold text-rose-700">{row.train}</td>
+                                <td className="p-4 font-mono text-[10px] text-slate-400">{String(row.id)}</td>
+                                <td className="p-4 font-medium whitespace-nowrap">{String(row.date)}</td>
+                                <td className="p-4 font-bold text-rose-700">{String(row.train)}</td>
                                 <td className="p-4 text-slate-600 max-w-md">
-                                  <span className="font-semibold text-slate-800">{row.subType || "No SubType"}</span> <br/>
-                                  <span className="text-xs">{row.desc}</span>
+                                  <span className="font-semibold text-slate-800">{String(row.subType || "No SubType")}</span> <br/>
+                                  <span className="text-xs">{String(row.desc)}</span>
                                 </td>
                               </tr>
                             ))}
@@ -746,16 +733,16 @@ export default function App() {
                         <thead className="sticky top-0 bg-slate-100 z-10 shadow-sm">
                           <tr className="text-slate-500 text-[10px] uppercase tracking-widest">
                             <th className="p-4 font-bold border-b border-slate-200">Train Number</th>
-                            {uniqueCats.map(c => <th key={c} className="p-4 font-bold border-b border-slate-200 whitespace-nowrap">{c}</th>)}
+                            {uniqueCats.map(c => <th key={c} className="p-4 font-bold border-b border-slate-200 whitespace-nowrap">{String(c)}</th>)}
                             <th className="p-4 font-black border-b border-slate-200 text-slate-800">Total</th>
                           </tr>
                         </thead>
                         <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
                           {trainData.map((row, idx) => (
                             <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                              <td className="p-4 font-bold flex items-center text-slate-900"><TrainFront className="w-4 h-4 mr-2 text-indigo-400" />{row.train}</td>
-                              {uniqueCats.map(c => <td key={c} className="p-4 font-medium text-slate-500">{row[c] || '-'}</td>)}
-                              <td className="p-4 font-black text-indigo-600">{row.Total}</td>
+                              <td className="p-4 font-bold flex items-center text-slate-900"><TrainFront className="w-4 h-4 mr-2 text-indigo-400" />{String(row.train)}</td>
+                              {uniqueCats.map(c => <td key={c} className="p-4 font-medium text-slate-500">{String(row[c] || '-')}</td>)}
+                              <td className="p-4 font-black text-indigo-600">{String(row.Total)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -816,8 +803,8 @@ export default function App() {
                         <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
                           {shiftData.map((row, idx) => (
                             <tr key={idx} className="hover:bg-slate-50">
-                              <td className="p-4 font-bold text-slate-800 flex items-center"><Clock className="w-4 h-4 mr-2 text-slate-400"/>{row.shift}</td>
-                              <td className="p-4 font-black text-indigo-600">{row.complaints}</td>
+                              <td className="p-4 font-bold text-slate-800 flex items-center"><Clock className="w-4 h-4 mr-2 text-slate-400"/>{String(row.shift)}</td>
+                              <td className="p-4 font-black text-indigo-600">{String(row.complaints)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -864,9 +851,9 @@ export default function App() {
                              <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
                                {unsatTable.map((row, idx) => (
                                  <tr key={idx} className="hover:bg-slate-50">
-                                   <td className="p-4 font-mono text-[10px] text-slate-400 whitespace-nowrap">{row.id}</td>
-                                   <td className="p-4 font-bold text-slate-800">{row.train}</td>
-                                   <td className="p-4 text-xs text-slate-600 max-w-md">{row.desc}</td>
+                                   <td className="p-4 font-mono text-[10px] text-slate-400 whitespace-nowrap">{String(row.id)}</td>
+                                   <td className="p-4 font-bold text-slate-800">{String(row.train)}</td>
+                                   <td className="p-4 text-xs text-slate-600 max-w-md">{String(row.desc)}</td>
                                  </tr>
                                ))}
                              </tbody>
