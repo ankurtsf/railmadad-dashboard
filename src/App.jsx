@@ -312,12 +312,11 @@ export default function App() {
         const workbook = window.XLSX.read(buffer, { type: 'array' });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
         
-        // Read as matrix
         const rawArray = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
         
         if (!rawArray || rawArray.length === 0) throw new Error("File is empty.");
 
-        // Aggressive header detection (scans up to 100 rows)
+        // Dynamic header detection (scans up to 100 rows)
         let headerRowIdx = -1;
         let colMap = {};
         const keyHeaders = ['complaintrefno', 'refno', 'createdon', 'comptypename', 'trainstation'];
@@ -423,7 +422,7 @@ export default function App() {
                 last_updated: new Date().toISOString() 
             });
         } else {
-            showToast("No new records were added (Duplicates detected).");
+            showToast("No new records added (Duplicates detected).");
         }
       } catch (err) {
         console.error("Parse Error:", err);
@@ -431,6 +430,10 @@ export default function App() {
       }
       setIsUploading(false);
       e.target.value = null; 
+    };
+    reader.onerror = () => {
+        showToast("❌ Error reading file buffer.");
+        setIsUploading(false);
     };
     reader.readAsArrayBuffer(file);
   };
