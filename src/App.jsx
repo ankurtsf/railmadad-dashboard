@@ -12,21 +12,12 @@ import {
 
 // ============================================================================
 // ⚠️ PRODUCTION IMPORTS (Uncomment these 2 lines in VS Code!) ⚠️
-// import { createClient } from '@supabase/supabase-js';
-// import * as XLSX from 'xlsx';
+import { createClient } from '@supabase/supabase-js';
+import * as XLSX from 'xlsx';
 // ============================================================================
 
 // ============================================================================
 // ⚠️ LOCAL PREVIEW MOCKS (DELETE THIS ENTIRE BLOCK IN VS CODE!) ⚠️
-const createClient = () => ({
-  from: () => ({
-    select: () => ({ eq: () => ({ single: async () => ({ data: null, error: null }) }) }),
-    update: () => ({ eq: async () => ({ error: null }) })
-  }),
-  channel: () => ({ on: () => ({ subscribe: () => ({}) }) }),
-  removeChannel: () => {}
-});
-const XLSX = { read: () => ({ SheetNames: [], Sheets: {} }), utils: { sheet_to_json: () => [] } };
 // ============================================================================
 
 // --- SUPABASE CONFIG ---
@@ -230,10 +221,19 @@ export default function App() {
     setIsUploading(true);
     
     const reader = new FileReader();
+    // Using ArrayBuffer instead of BinaryString for robust .xlsx support
     reader.onload = async (evt) => {
       try {
-        const bstr = evt.target.result;
-        const workbook = XLSX.read(bstr, { type: 'binary' });
+        const buffer = evt.target.result;
+        const workbook = XLSX.read(buffer, { type: 'array' });
+        
+        // Block if the mock is still active
+        if (workbook.isMock) {
+            setIsUploading(false);
+            e.target.value = null;
+            return;
+        }
+
         const newData = JSON.parse(JSON.stringify(dbData));
         
         const sheetNames = workbook.SheetNames || [];
@@ -373,7 +373,7 @@ export default function App() {
       setIsUploading(false);
       e.target.value = null; 
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
   };
 
   const executeHardReset = async () => {
