@@ -42,6 +42,31 @@ const STOP_WORDS = new Set([
 // ──────────────────────────────────────────────────────────────────
 // FORMATTERS & HELPERS
 // ──────────────────────────────────────────────────────────────────
+const calculateFrustration = (text) => {
+  if (!text || text.trim() === '—') return 10;
+  const lowerText = text.toLowerCase();
+  
+  // Heuristic Lexicons
+  const severeWords = ['worst', 'terrible', 'horrible', 'disgusting', 'pathetic', 'useless', 'garbage', 'trash', 'unbearable', 'suffer', 'hell', 'fraud', 'cheat', 'unhygienic', 'filthy'];
+  const angryWords = ['bad', 'poor', 'dirty', 'late', 'missing', 'broken', 'rude', 'smell', 'stink', 'cockroach', 'rodent', 'waterless', 'dry', 'unclean', 'not working', 'not closed', 'issue', 'problem', 'delay'];
+  
+  let score = 25; // Standard baseline
+  
+  severeWords.forEach(w => { if (lowerText.includes(w)) score += 25; });
+  angryWords.forEach(w => { if (lowerText.includes(w)) score += 10; });
+  
+  // Punctuation multiplier (Anger marker)
+  const exclamations = (text.match(/!/g) || []).length;
+  score += (exclamations * 5);
+  
+  // ALL CAPS multiplier (Shouting marker)
+  const words = text.split(/\s+/);
+  const allCapsWords = words.filter(w => w.length > 3 && w === w.toUpperCase());
+  score += (allCapsWords.length * 3);
+
+  return Math.min(100, score);
+};
+
 const formatHumanDate = (dateStr) => {
   if (!dateStr) return '—';
   const d = new Date(dateStr);
@@ -616,6 +641,7 @@ export default function App() {
       sparkObj.total++;
       if (isToday) kpisToday.total++;
 
+      // BUG FIX: Added 'bed roll' to match un-concatenated strings
       if (catLow.includes('bedroll') || catLow.includes('bed roll') || catLow.includes('linen')) { kpis.bedroll++; sparkObj.bedroll++; if(isToday) kpisToday.bedroll++; }
       if (catLow.includes('clean') || catLow.includes('dirt')) { kpis.clean++; sparkObj.clean++; if(isToday) kpisToday.clean++; }
       if (catLow.includes('water') || catLow.includes('plumb')) { kpis.water++; sparkObj.water++; if(isToday) kpisToday.water++; }
@@ -672,9 +698,21 @@ export default function App() {
         wateringMap.set(r.nextStation, (wateringMap.get(r.nextStation) || 0) + 1);
       }
 
+      // AI Sentiment & Parsing Logic
+      const combinedTextForAI = (String(r.desc) + ' ' + String(r.feedbackRemark)).toLowerCase();
+      const frustrationIdx = r.frustrationIndex ?? calculateFrustration(combinedTextForAI);
+      
+      const dryRegex = /(no water|water empty|dry)/i;
+      const isCriticalDry = r.isCriticalDry !== undefined ? r.isCriticalDry : ((catLow.includes('water') || catLow.includes('plumb')) && dryRegex.test(combinedTextForAI));
+      
+      const pestRegex = /(cockroach|rodent|rat|mouse|pest|bedbug)/i;
+      const isPest = r.isPest !== undefined ? r.isPest : (pestRegex.test(combinedTextForAI) || pestRegex.test(String(r.subType).toLowerCase()));
+
+      const enhancedRecord = { ...r, frustrationIndex: frustrationIdx, isCriticalDry, isPest };
+
       const subLow = String(r.subType).toLowerCase();
-      if (r.isPest || subLow.includes('window') || subLow.includes('door') || subLow.includes('panel')) {
-        pestDefectTable.push(r);
+      if (isPest || isCriticalDry || subLow.includes('window') || subLow.includes('door') || subLow.includes('panel')) {
+        pestDefectTable.push(enhancedRecord);
       }
 
       const cType = String(r.coachType) || 'Unknown';
@@ -682,7 +720,9 @@ export default function App() {
       const cObj = coachCatMap.get(cType);
       cObj.Total++; cObj[r.category] = (cObj[r.category] || 0) + 1;
 
-      if (String(r.rating).toLowerCase().includes('unsatisfactory')) unsatTable.push(r);
+      if (String(r.rating).toLowerCase().includes('unsatisfactory')) {
+        unsatTable.push(enhancedRecord);
+      }
 
       const combinedText = (String(r.desc) + ' ' + String(r.feedbackRemark)).toLowerCase();
       const words = combinedText.replace(/[^a-z]/g, ' ').split(/\s+/);
@@ -914,10 +954,13 @@ export default function App() {
             const rawCat = getValue(row, 'comptypename') || 'Uncategorized';
             const rawSubCat = getValue(row, 'subtypename') || '';
             const rawDesc = getValue(row, 'complaintdesc') || '';
-
-            const isPest = rawSubCat.toLowerCase().includes('cockroach') || rawSubCat.toLowerCase().includes('rodent') ||
-              rawSubCat.toLowerCase().includes('rat') || rawSubCat.toLowerCase().includes('pest') ||
-              rawDesc.toLowerCase().includes('cockroach') || rawDesc.toLowerCase().includes('rodent');
+            
+            const combinedTextForAI = (`${rawDesc} ${getValue(row, 'feedbackremark') || ''}`).toLowerCase();
+            const frustrationIndex = calculateFrustration(combinedTextForAI);
+            const dryRegex = /(no water|water empty|dry)/i;
+            const isCriticalDry = (String(rawCat).toLowerCase().includes('water') || String(rawCat).toLowerCase().includes('plumb')) && dryRegex.test(combinedTextForAI);
+            const pestRegex = /(cockroach|rodent|rat|mouse|pest|bedbug)/i;
+            const isPest = pestRegex.test(combinedTextForAI) || pestRegex.test(String(rawSubCat).toLowerCase());
 
             const trainStation = getValue(row, 'trainstation');
             const trainReportName = getValue(row, 'trainnameforreport');
@@ -931,6 +974,8 @@ export default function App() {
               category: String(rawCat).trim(),
               subType: String(rawSubCat).trim(),
               isPest,
+              isCriticalDry,
+              frustrationIndex,
               train: trainNo,
               nextStation: String(getValue(row, 'nextstation') || 'Unknown').trim(),
               rating: String(getValue(row, 'rating') || 'Not Rated').trim(),
@@ -1867,7 +1912,19 @@ export default function App() {
                               <th className="p-4 font-bold">Ref No.</th>
                               <th className="p-4 font-bold">Train</th>
                               <th className="p-4 font-bold">Disposal Time</th>
-                              <th className="p-4 font-bold">Passenger Desc. & Feedback</th>
+                              <th className="p-4 font-bold text-center w-32 relative">
+                                 <div className="flex items-center justify-center whitespace-nowrap">
+                                   Frustration Index
+                                   <div className="relative group/tooltip ml-1.5 flex items-center justify-center">
+                                      <div className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-[9px] font-black cursor-help bg-rose-200 dark:bg-rose-900 text-rose-600 dark:text-rose-300">i</div>
+                                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2.5 bg-slate-800 dark:bg-slate-700 text-white text-xs font-medium rounded-lg shadow-2xl opacity-0 group-hover/tooltip:opacity-100 pointer-events-none transition-opacity z-[9999] text-center leading-tight whitespace-normal font-normal">
+                                        AI-calculated score (1-100) based on the severity of negative words and punctuation used by the passenger.
+                                        <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800 dark:border-t-slate-700"></div>
+                                      </div>
+                                    </div>
+                                 </div>
+                              </th>
+                              <th className="p-4 font-bold w-1/3">Passenger Desc. & Feedback</th>
                               <th className="p-4 font-bold">Closing Remarks</th>
                             </tr>
                           </thead>
@@ -1877,7 +1934,20 @@ export default function App() {
                                 <td className="p-4 font-mono text-[10px] text-slate-400 whitespace-nowrap">{row.id}</td>
                                 <td className="p-4 font-bold text-slate-800 dark:text-white whitespace-nowrap">{row.train || '—'}</td>
                                 <td className="p-4 font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">{formatTime(row.resTimeMins)}</td>
-                                <td className="p-4 text-xs max-w-sm py-4">
+                                <td className="p-4 text-center">
+                                   {row.frustrationIndex >= 80 ? (
+                                       <span className="font-black text-rose-600 dark:text-rose-400 text-sm">{row.frustrationIndex}</span>
+                                   ) : row.frustrationIndex >= 50 ? (
+                                       <span className="font-bold text-orange-500 dark:text-orange-400 text-sm">{row.frustrationIndex}</span>
+                                   ) : (
+                                       <span className="font-medium text-slate-500 dark:text-slate-400 text-sm">{row.frustrationIndex}</span>
+                                   )}
+                                </td>
+                                <td className="p-4 text-xs py-4">
+                                  <div className="mb-1">
+                                    {row.isPest && <span className="inline-block bg-rose-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm mr-1">PEST HAZARD</span>}
+                                    {row.isCriticalDry && <span className="inline-block bg-sky-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm mr-1">CRITICAL DRY</span>}
+                                  </div>
                                   <ExpandableText text={cleanFeedbackText(row.desc, row.feedbackRemark)} />
                                 </td>
                                 <td className="p-4 text-xs text-indigo-700 dark:text-indigo-300 max-w-xs">{row.remarks || '—'}</td>
@@ -1909,6 +1979,11 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody className="text-sm text-slate-700 dark:text-slate-300 divide-y divide-slate-100 dark:divide-slate-800">
+                          <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
+                            <td className="p-4 font-bold text-slate-900 dark:text-white">Frustration Index</td>
+                            <td className="p-4 text-slate-600 dark:text-slate-400">AI-calculated heuristic score assessing severity of passenger complaints.</td>
+                            <td className="p-4 font-mono text-xs text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-900/10">Base Score 25 + (Severe Words * 25) + (Punctuation * 5)</td>
+                          </tr>
                           <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
                             <td className="p-4 font-bold text-slate-900 dark:text-white">SLA Compliance Trend</td>
                             <td className="p-4 text-slate-600 dark:text-slate-400">Tracks the daily proportion of tickets resolved within the target timeframe.</td>
