@@ -21,14 +21,12 @@ const parseRawDate = (raw) => {
     if (!raw) return null;
     const str = String(raw).trim();
     
-    // Ignore floating point reference numbers masquerading as strings
     if (/^\d+\.\d+$/.test(str) && str.length > 10) return null; 
 
     let hour = 12;
     let dateStr = '';
     let monthStr = '';
 
-    // Handle Excel serial number conversion
     if (!isNaN(Number(raw)) && typeof raw === 'number' && raw > 40000 && raw < 70000) {
         const d = new Date(Math.round((raw - 25569) * 86400 * 1000));
         hour = d.getUTCHours();
@@ -66,7 +64,6 @@ const parseResolutionTime = (val) => {
     return 0;
 };
 
-// Word cloud stopwords
 const STOP_WORDS = new window.Set(['and','the','was','for','that','with','from','this','have','not','are','but','has','had','been','very','they','will','coach','train','seat','berth','number','passenger', 'is', 'it', 'to', 'in', 'of', 'on']);
 
 const navItemsList = [
@@ -76,12 +73,13 @@ const navItemsList = [
   { id: 'sentiment', label: '4. Passenger Sentiment', icon: MessageSquareWarning },
 ];
 
-const MetricCard = ({ title, value, icon: Icon, colorClass }) => (
+const MetricCard = ({ title, value, icon: Icon, colorClass, subtitle }) => (
   <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 flex flex-col justify-between h-full">
     <div className="flex justify-between items-start mb-2">
       <div>
         <p className="text-sm font-medium text-slate-500 mb-1">{String(title)}</p>
         <h3 className="text-2xl font-bold text-slate-800">{String(value)}</h3>
+        {subtitle && <p className="text-xs text-slate-400 mt-1">{String(subtitle)}</p>}
       </div>
       <div className={`p-3 rounded-lg ${colorClass} bg-opacity-10`}>
         <Icon className={`w-6 h-6 ${colorClass.replace('bg-', 'text-')}`} />
@@ -89,6 +87,20 @@ const MetricCard = ({ title, value, icon: Icon, colorClass }) => (
     </div>
   </div>
 );
+
+// Custom label for PieChart
+const renderCustomPieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }) => {
+  if (percent < 0.04) return null;
+  const RADIAN = Math.PI / 180;
+  const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+  const x = cx + radius * Math.cos(-midAngle * RADIAN);
+  const y = cy + radius * Math.sin(-midAngle * RADIAN);
+  return (
+    <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={700}>
+      {`${(percent * 100).toFixed(0)}%`}
+    </text>
+  );
+};
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('executive');
@@ -100,7 +112,6 @@ export default function App() {
   const [dbData, setDbData] = useState(initialRawDatabase);
   const [supabaseClient, setSupabaseClient] = useState(null);
 
-  // Filters State
   const todayStr = new Date().toISOString().split('T')[0];
   const lastMonthStr = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   
@@ -131,7 +142,6 @@ export default function App() {
       }
   };
 
-  // 1. Inject Dependencies Dynamically
   useEffect(() => {
     const loadDependencies = async () => {
       try {
@@ -182,10 +192,7 @@ export default function App() {
     if (!client) { loadLocalFallback(); return; }
     try {
       const { data, error } = await client.from('railmadad_sync').select('*').eq('id', 1).single();
-      if (error) {
-        loadLocalFallback();
-        return;
-      }
+      if (error) { loadLocalFallback(); return; }
       if (data && data.json_data && data.json_data.records) {
         applyDashboardData(data.json_data, new Date(data.last_updated || Date.now()).toLocaleTimeString());
         localStorage.setItem('railmadad_local_sync', JSON.stringify(data.json_data));
@@ -203,7 +210,6 @@ export default function App() {
   const aggregated = useMemo(() => {
     const rawRecords = dbData.records || [];
 
-    // Filter Options
     const opt = {
         buckets: new window.Set(), trains: new window.Set(), coaches: new window.Set(),
         zones: new window.Set(), locations: new window.Set(), cats: new window.Set(),
@@ -223,7 +229,6 @@ export default function App() {
         if(r.status) opt.statuses.add(r.status);
     });
 
-    // Apply Filters
     const validRecords = rawRecords.filter(r => {
         if (r.date < filters.fromDate || r.date > filters.toDate) return false;
         if (filters.timeBucket !== 'All' && r.shift2 !== filters.timeBucket) return false;
@@ -238,7 +243,7 @@ export default function App() {
         return true;
     });
 
-    // Structures
+    // --- EXISTING AGGREGATIONS ---
     const kpis = { total: validRecords.length, bedroll: 0, clean: 0, water: 0, maint: 0 };
     const trainCatMap = new window.Map();
     const zoneDivMap = new window.Map();
@@ -258,6 +263,22 @@ export default function App() {
     const uniqueDivs = new window.Set();
     const scatterData = [];
 
+    // --- NEW: Month-on-month maps ---
+    const monthlyTotalMap = new window.Map();      // month -> count
+    const monthlyCatMap = new window.Map();         // month -> { cat: count }
+    const monthlyRatingMap = new window.Map();      // month -> { rating: count }
+    const monthlyZoneMap = new window.Map();        // month -> { zone: count }
+    const ratingTotalMap = new window.Map();        // rating -> count
+    const zoneTotalMap = new window.Map();          // zone -> count
+
+    let totalResTimeMins = 0;
+    let resTimeCount = 0;
+    let totalRatingScore = 0;
+    let ratingScoreCount = 0;
+    const resolvedStatuses = ['closed', 'resolved', 'attended', 'attended to'];
+    let resolvedCount = 0;
+    const uniqueZones = new window.Set();
+
     validRecords.forEach(r => {
         // KPIs
         const catLow = String(r.category).toLowerCase();
@@ -266,7 +287,55 @@ export default function App() {
         if (catLow.includes('water') || catLow.includes('plumb')) kpis.water++;
         if (catLow.includes('maintain') || catLow.includes('coach') || catLow.includes('equip')) kpis.maint++;
 
+        // Resolved count
+        const statusLow = String(r.status).toLowerCase();
+        if (resolvedStatuses.some(s => statusLow.includes(s))) resolvedCount++;
+
+        // Avg resolution time
+        if (r.resTimeMins > 0) {
+            totalResTimeMins += r.resTimeMins;
+            resTimeCount++;
+        }
+
+        // Avg rating score (Satisfactory=3, Neutral=2, Unsatisfactory=1)
+        const ratingLow = String(r.rating).toLowerCase();
+        if (ratingLow.includes('satisfactory') && !ratingLow.includes('un')) { totalRatingScore += 3; ratingScoreCount++; }
+        else if (ratingLow.includes('neutral')) { totalRatingScore += 2; ratingScoreCount++; }
+        else if (ratingLow.includes('unsatisfactory')) { totalRatingScore += 1; ratingScoreCount++; }
+
+        // Zone tracking
+        const zoneKey = r.ownZone && r.ownZone !== 'Unknown' ? r.ownZone : (r.zone && r.zone !== 'Unknown' ? r.zone : null);
+        if (zoneKey) uniqueZones.add(zoneKey);
+
         uniqueCats.add(String(r.category));
+
+        // Month tracking
+        const mon = r.month || 'Unknown';
+
+        // Monthly total
+        monthlyTotalMap.set(mon, (monthlyTotalMap.get(mon) || 0) + 1);
+
+        // Monthly category
+        if (!monthlyCatMap.has(mon)) monthlyCatMap.set(mon, {});
+        const mCatObj = monthlyCatMap.get(mon);
+        mCatObj[r.category] = (mCatObj[r.category] || 0) + 1;
+
+        // Monthly rating
+        if (!monthlyRatingMap.has(mon)) monthlyRatingMap.set(mon, {});
+        const mRatObj = monthlyRatingMap.get(mon);
+        const ratingKey = String(r.rating || 'Not Rated');
+        mRatObj[ratingKey] = (mRatObj[ratingKey] || 0) + 1;
+
+        // Rating total for pie
+        ratingTotalMap.set(ratingKey, (ratingTotalMap.get(ratingKey) || 0) + 1);
+
+        // Monthly zone
+        if (zoneKey) {
+            if (!monthlyZoneMap.has(mon)) monthlyZoneMap.set(mon, {});
+            const mZoneObj = monthlyZoneMap.get(mon);
+            mZoneObj[zoneKey] = (mZoneObj[zoneKey] || 0) + 1;
+            zoneTotalMap.set(zoneKey, (zoneTotalMap.get(zoneKey) || 0) + 1);
+        }
 
         // Train Matrix
         if (!trainCatMap.has(r.train)) trainCatMap.set(r.train, { train: r.train, Total: 0 });
@@ -291,7 +360,6 @@ export default function App() {
             const cr = catResMap.get(r.category);
             cr.sum += r.resTimeMins; cr.count++;
 
-            // Quick Close Audit
             const rateStr = String(r.rating).toLowerCase();
             const rateCat = rateStr.includes('unsatisfactory') ? 'Unsatisfactory' : (rateStr.includes('satisfactory') ? 'Satisfactory' : 'Neutral');
             if (r.resTimeMins < 15) quickCloseMap['< 15m'][rateCat]++;
@@ -299,29 +367,24 @@ export default function App() {
             else quickCloseMap['> 60m'][rateCat]++;
         }
 
-        // Territorial Watering
         if (catLow.includes('water') && r.nextStation && r.nextStation !== 'Unknown') {
             wateringMap.set(r.nextStation, (wateringMap.get(r.nextStation) || 0) + 1);
         }
 
-        // Pest & Defect
         const subLow = String(r.subType).toLowerCase();
         if (r.isPest || subLow.includes('window') || subLow.includes('door') || subLow.includes('panel')) {
             pestDefectTable.push(r);
         }
 
-        // Asset Health
         const cType = String(r.coachType) || 'Unknown';
         if (!coachCatMap.has(cType)) coachCatMap.set(cType, { coachType: cType, Total: 0 });
         const cObj = coachCatMap.get(cType);
         cObj.Total++; cObj[r.category] = (cObj[r.category] || 0) + 1;
 
-        // Unsat Table
         if (String(r.rating).toLowerCase().includes('unsatisfactory')) {
             unsatTable.push(r);
         }
 
-        // Words
         const combinedText = (String(r.desc) + " " + String(r.feedbackRemark)).toLowerCase();
         const words = combinedText.replace(/[^a-z]/g, ' ').split(/\s+/);
         words.forEach(w => {
@@ -329,8 +392,71 @@ export default function App() {
         });
     });
 
-    const uniqueCatsArray = Array.from(uniqueCats).sort();
-    const uniqueDivsArray = Array.from(uniqueDivs).sort();
+    // --- Build sorted months array ---
+    const allMonths = Array.from(monthlyTotalMap.keys()).sort();
+
+    // Monthly total bar chart data
+    const monthlyTotalBar = allMonths.map(m => ({ month: m, complaints: monthlyTotalMap.get(m) || 0 }));
+
+    // Category month-on-month table
+    const uniqueCatsArray = Array.from(uniqueCats).filter(c => c !== 'Uncategorized').sort();
+    const catMomTable = allMonths.map(m => {
+        const row = { month: m };
+        uniqueCatsArray.forEach(c => { row[c] = monthlyCatMap.get(m)?.[c] || 0; });
+        row.total = monthlyTotalMap.get(m) || 0;
+        return row;
+    });
+
+    // Rating pie data
+    const ratingPieData = Array.from(ratingTotalMap.entries())
+        .map(([name, value]) => ({ name, value }))
+        .sort((a, b) => b.value - a.value);
+
+    // Rating month-on-month table
+    const uniqueRatings = Array.from(new window.Set(ratingPieData.map(r => r.name))).sort();
+    const ratingMomTable = allMonths.map(m => {
+        const row = { month: m };
+        uniqueRatings.forEach(rt => { row[rt] = monthlyRatingMap.get(m)?.[rt] || 0; });
+        row.total = monthlyTotalMap.get(m) || 0;
+        return row;
+    });
+
+    // Zone pie data
+    const zonePieData = Array.from(zoneTotalMap.entries())
+        .map(([name, value]) => ({ name, value }))
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 10);
+
+    // Zone month-on-month trend (top 5 zones)
+    const top5Zones = zonePieData.slice(0, 5).map(z => z.name);
+    const zoneMomTable = allMonths.map(m => {
+        const row = { month: m };
+        top5Zones.forEach(z => { row[z] = monthlyZoneMap.get(m)?.[z] || 0; });
+        row.total = Array.from(zoneTotalMap.values()).reduce((a,b)=>a+b,0);
+        return row;
+    });
+
+    // KPIs for executive
+    const tenureLabel = allMonths.length > 0 ? `${allMonths[0]} to ${allMonths[allMonths.length - 1]}` : 'N/A';
+    const currentMonth = new Date().toISOString().substring(0, 7);
+    const thisMonthCount = monthlyTotalMap.get(currentMonth) || 0;
+    const avgResMins = resTimeCount > 0 ? Math.round(totalResTimeMins / resTimeCount) : 0;
+    const avgResLabel = avgResMins > 0 ? `${Math.floor(avgResMins / 60)}h ${avgResMins % 60}m` : 'N/A';
+    const avgRatingLabel = ratingScoreCount > 0
+        ? (totalRatingScore / ratingScoreCount >= 2.5 ? 'Satisfactory' : totalRatingScore / ratingScoreCount >= 1.5 ? 'Neutral' : 'Unsatisfactory')
+        : 'N/A';
+
+    const execKpis = {
+        totalComplaints: validRecords.length,
+        tenureLabel,
+        thisMonthCount,
+        resolvedCount,
+        totalRegions: uniqueZones.size,
+        avgResLabel,
+        avgRatingLabel,
+    };
+
+    const uniqueCatsArrayFull = Array.from(uniqueCats).sort();
     const trainMatrix = Array.from(trainCatMap.values()).sort((a,b) => b.Total - a.Total);
     const zoneDivBar = Array.from(zoneDivMap.values()).sort((a,b) => b.Total - a.Total);
     const shiftHeatmap = Array.from(shiftCatMap.values()).sort((a,b) => String(a.shift).localeCompare(String(b.shift)));
@@ -341,15 +467,25 @@ export default function App() {
     const wordCloud = Array.from(wordMap.entries()).map(([text, value]) => ({ text: String(text), value })).sort((a,b) => b.value - a.value).slice(0, 40).map(w => ({ ...w, fontSize: Math.max(12, Math.min(48, w.value * 1.5)) }));
 
     return { 
-        kpis, options: opt,
-        trainMatrix, zoneDivBar, uniqueDivsArray, shiftHeatmap, scatterData, resSpeedBar, 
-        wateringList, pestDefectTable, coachMatrix, unsatTable, quickCloseData, wordCloud, uniqueCatsArray 
+        kpis, execKpis, options: opt,
+        trainMatrix, zoneDivBar, uniqueDivsArray: Array.from(uniqueDivs).sort(), shiftHeatmap, scatterData, resSpeedBar, 
+        wateringList, pestDefectTable, coachMatrix, unsatTable, quickCloseData, wordCloud,
+        uniqueCatsArray: uniqueCatsArrayFull,
+        // New executive data
+        monthlyTotalBar, catMomTable, uniqueCatsArrayForMom: uniqueCatsArray,
+        ratingPieData, ratingMomTable, uniqueRatings,
+        zonePieData, zoneMomTable, top5Zones,
+        allMonths,
     };
   }, [dbData, filters]);
 
   const { 
-    kpis, options, trainMatrix, zoneDivBar, uniqueDivsArray, shiftHeatmap, scatterData, resSpeedBar, 
-    wateringList, pestDefectTable, coachMatrix, unsatTable, quickCloseData, wordCloud, uniqueCatsArray 
+    kpis, execKpis, options, trainMatrix, zoneDivBar, uniqueDivsArray, shiftHeatmap, scatterData, resSpeedBar, 
+    wateringList, pestDefectTable, coachMatrix, unsatTable, quickCloseData, wordCloud, uniqueCatsArray,
+    monthlyTotalBar, catMomTable, uniqueCatsArrayForMom,
+    ratingPieData, ratingMomTable, uniqueRatings,
+    zonePieData, zoneMomTable, top5Zones,
+    allMonths,
   } = aggregated;
 
   // --- FILE PARSER ---
@@ -462,8 +598,6 @@ export default function App() {
 
         if (newRecordsAdded > 0) {
             const newData = { records: Array.from(idMap.values()) };
-            
-            // Critical persistence
             applyDashboardData(newData, "Saved to Cache");
             localStorage.setItem('railmadad_local_sync', JSON.stringify(newData));
             showToast(`✅ Appended ${newRecordsAdded} records.`);
@@ -581,7 +715,7 @@ export default function App() {
           <button onClick={() => setIsMobileMenuOpen(true)}><Menu className="w-6 h-6" /></button>
         </header>
 
-        {/* COMPREHENSIVE GLOBAL FILTERS */}
+        {/* GLOBAL FILTERS */}
         <div className="bg-white border-b border-slate-200 z-20 sticky top-0 md:top-0 shadow-sm">
            <div className="px-4 md:px-8 py-4 flex justify-between items-center border-b border-slate-100">
                <h2 className="text-xl font-black text-slate-800 tracking-tight">{String(navItemsList.find(i => i.id === activeTab)?.label)}</h2>
@@ -622,17 +756,275 @@ export default function App() {
              </div>
           ) : (
             <>
-              {/* TAB 1: EXECUTIVE OVERVIEW */}
+              {/* ============================================================ */}
+              {/* TAB 1: EXECUTIVE OVERVIEW — FULLY REPLACED                   */}
+              {/* ============================================================ */}
               {activeTab === 'executive' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
-                    <MetricCard title="Total Volume" value={String(kpis.total)} icon={LayoutDashboard} colorClass="bg-blue-600 text-white" />
-                    <MetricCard title="Bedroll" value={String(kpis.bedroll)} icon={Sparkles} colorClass="bg-purple-600 text-white" />
-                    <MetricCard title="Cleanliness" value={String(kpis.clean)} icon={Sparkles} colorClass="bg-emerald-600 text-white" />
-                    <MetricCard title="Watering" value={String(kpis.water)} icon={Sparkles} colorClass="bg-sky-600 text-white" />
-                    <MetricCard title="Maintenance" value={String(kpis.maint)} icon={Sparkles} colorClass="bg-amber-600 text-white" />
+
+                  {/* ── SECTION 1: KEY NUMBERS ── */}
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
+                      Key Numbers · {String(execKpis.tenureLabel)}
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+                      <MetricCard
+                        title="Total Complaints"
+                        value={execKpis.totalComplaints.toLocaleString()}
+                        subtitle={execKpis.tenureLabel}
+                        icon={LayoutDashboard}
+                        colorClass="bg-blue-600"
+                      />
+                      <MetricCard
+                        title="This Month"
+                        value={execKpis.thisMonthCount.toLocaleString()}
+                        subtitle={new Date().toLocaleString('default', { month: 'long', year: 'numeric' })}
+                        icon={Calendar}
+                        colorClass="bg-indigo-600"
+                      />
+                      <MetricCard
+                        title="Resolved"
+                        value={execKpis.resolvedCount.toLocaleString()}
+                        subtitle={`${execKpis.totalComplaints > 0 ? Math.round(execKpis.resolvedCount / execKpis.totalComplaints * 100) : 0}% resolution rate`}
+                        icon={CheckCircle}
+                        colorClass="bg-emerald-600"
+                      />
+                      <MetricCard
+                        title="Regions Covered"
+                        value={execKpis.totalRegions.toLocaleString()}
+                        subtitle="Unique zones"
+                        icon={LucideMap}
+                        colorClass="bg-sky-600"
+                      />
+                      <MetricCard
+                        title="Avg Resolution Time"
+                        value={execKpis.avgResLabel}
+                        subtitle="Across resolved cases"
+                        icon={Clock}
+                        colorClass="bg-amber-600"
+                      />
+                      <MetricCard
+                        title="Avg Resolution Rating"
+                        value={execKpis.avgRatingLabel}
+                        subtitle="Passenger feedback"
+                        icon={Sparkles}
+                        colorClass="bg-purple-600"
+                      />
+                    </div>
                   </div>
 
+                  {/* ── SECTION 2: TOTAL COMPLAINTS BAR + CATEGORY MOM TABLE ── */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    {/* Bar Chart */}
+                    <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                      <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">
+                        Total Complaints — Month on Month
+                      </h3>
+                      <div className="h-[320px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={monthlyTotalBar} margin={{ left: 0, right: 10, bottom: 30 }}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                            <XAxis
+                              dataKey="month"
+                              axisLine={false}
+                              tickLine={false}
+                              tick={{ fontSize: 11, fill: '#64748b', fontWeight: 600 }}
+                              angle={-35}
+                              textAnchor="end"
+                              dy={10}
+                            />
+                            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11 }} />
+                            <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
+                            <Bar dataKey="complaints" name="Complaints" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={28} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    {/* Category Month-on-Month Table */}
+                    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                      <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
+                        <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">
+                          Category-wise Month on Month
+                        </h3>
+                      </div>
+                      <div className="overflow-x-auto max-h-[360px]">
+                        <table className="min-w-full text-left border-collapse">
+                          <thead className="sticky top-0 bg-slate-100 z-10">
+                            <tr className="text-slate-500 text-[10px] uppercase tracking-widest">
+                              <th className="p-3 font-bold border-b border-slate-200 whitespace-nowrap">Month</th>
+                              {uniqueCatsArrayForMom.slice(0, 5).map(c => (
+                                <th key={c} className="p-3 font-bold border-b border-slate-200 whitespace-nowrap">{c}</th>
+                              ))}
+                              <th className="p-3 font-black border-b border-slate-200 text-slate-800">Total</th>
+                            </tr>
+                          </thead>
+                          <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
+                            {catMomTable.map((row, idx) => (
+                              <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                                <td className="p-3 font-bold text-slate-800 whitespace-nowrap">{row.month}</td>
+                                {uniqueCatsArrayForMom.slice(0, 5).map(c => (
+                                  <td key={c} className="p-3 text-slate-600">{row[c] || '-'}</td>
+                                ))}
+                                <td className="p-3 font-black text-indigo-600">{row.total}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ── SECTION 3: RATING PIE + RATING MOM TABLE ── */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    {/* Rating Pie Chart */}
+                    <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                      <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4">
+                        Rating Distribution
+                      </h3>
+                      <div className="h-[320px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={ratingPieData}
+                              cx="50%"
+                              cy="50%"
+                              outerRadius={110}
+                              dataKey="value"
+                              labelLine={false}
+                              label={renderCustomPieLabel}
+                            >
+                              {ratingPieData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
+                            <Legend
+                              formatter={(value) => <span style={{ fontSize: 12, color: '#334155', fontWeight: 600 }}>{value}</span>}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    {/* Rating Month-on-Month Table */}
+                    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                      <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
+                        <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">
+                          Rating-wise Month on Month
+                        </h3>
+                      </div>
+                      <div className="overflow-x-auto max-h-[360px]">
+                        <table className="min-w-full text-left border-collapse">
+                          <thead className="sticky top-0 bg-slate-100 z-10">
+                            <tr className="text-slate-500 text-[10px] uppercase tracking-widest">
+                              <th className="p-3 font-bold border-b border-slate-200 whitespace-nowrap">Month</th>
+                              {uniqueRatings.slice(0, 4).map(r => (
+                                <th key={r} className="p-3 font-bold border-b border-slate-200 whitespace-nowrap">{r}</th>
+                              ))}
+                              <th className="p-3 font-black border-b border-slate-200 text-slate-800">Total</th>
+                            </tr>
+                          </thead>
+                          <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
+                            {ratingMomTable.map((row, idx) => (
+                              <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                                <td className="p-3 font-bold text-slate-800 whitespace-nowrap">{row.month}</td>
+                                {uniqueRatings.slice(0, 4).map(r => {
+                                  const val = row[r] || 0;
+                                  const rLow = String(r).toLowerCase();
+                                  const chipClass = rLow.includes('unsatisfactory')
+                                    ? 'bg-rose-100 text-rose-700 font-bold'
+                                    : rLow.includes('neutral')
+                                    ? 'bg-amber-100 text-amber-700 font-bold'
+                                    : rLow.includes('satisfactory')
+                                    ? 'bg-emerald-100 text-emerald-700 font-bold'
+                                    : 'text-slate-500';
+                                  return (
+                                    <td key={r} className="p-3">
+                                      {val > 0 ? <span className={`px-2 py-0.5 rounded text-xs ${chipClass}`}>{val}</span> : <span className="text-slate-300">-</span>}
+                                    </td>
+                                  );
+                                })}
+                                <td className="p-3 font-black text-indigo-600">{row.total}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ── SECTION 4: REGION PIE + REGION MOM TREND ── */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    {/* Region Pie Chart */}
+                    <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                      <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4">
+                        Region-wise Distribution (Top 10 Zones)
+                      </h3>
+                      <div className="h-[320px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={zonePieData}
+                              cx="50%"
+                              cy="50%"
+                              outerRadius={110}
+                              dataKey="value"
+                              labelLine={false}
+                              label={renderCustomPieLabel}
+                            >
+                              {zonePieData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
+                            <Legend
+                              formatter={(value) => <span style={{ fontSize: 11, color: '#334155', fontWeight: 600 }}>{value}</span>}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    {/* Region Month-on-Month Trend */}
+                    <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                      <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">
+                        Region-wise Month on Month Trend (Top 5 Zones)
+                      </h3>
+                      <div className="h-[320px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={zoneMomTable} margin={{ left: 0, right: 20, bottom: 30 }}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                            <XAxis
+                              dataKey="month"
+                              axisLine={false}
+                              tickLine={false}
+                              tick={{ fontSize: 11, fill: '#64748b', fontWeight: 600 }}
+                              angle={-35}
+                              textAnchor="end"
+                              dy={10}
+                            />
+                            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11 }} />
+                            <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
+                            <Legend verticalAlign="top" height={36} formatter={(value) => <span style={{ fontSize: 11, fontWeight: 600 }}>{value}</span>} />
+                            {top5Zones.map((zone, i) => (
+                              <Line
+                                key={zone}
+                                type="monotone"
+                                dataKey={zone}
+                                stroke={COLORS[i % COLORS.length]}
+                                strokeWidth={2}
+                                dot={{ r: 3 }}
+                                activeDot={{ r: 5 }}
+                              />
+                            ))}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ── SECTION 5: EXISTING — Foreign Train Correlation ── */}
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm col-span-1 lg:col-span-3">
                       <div className="flex items-center justify-between mb-6">
@@ -656,6 +1048,7 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* ── SECTION 6: EXISTING — Major Complaint Giving Trains Matrix ── */}
                   <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden h-fit">
                     <div className="px-6 py-5 border-b border-slate-100 bg-slate-50"><h3 className="text-base font-bold text-slate-800">Major Complaint Giving Trains (Matrix)</h3></div>
                     <div className="overflow-x-auto max-h-[600px]">
@@ -673,10 +1066,14 @@ export default function App() {
                       </table>
                     </div>
                   </div>
+
                 </div>
               )}
+              {/* ============================================================ */}
+              {/* END TAB 1                                                    */}
+              {/* ============================================================ */}
 
-              {/* TAB 2: OPERATIONS & TIME BUCKETS */}
+              {/* TAB 2: OPERATIONS & TIME BUCKETS — UNCHANGED */}
               {activeTab === 'operations' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden h-fit">
@@ -713,7 +1110,6 @@ export default function App() {
                                 <ZAxis type="category" dataKey="name" name="Ref" />
                                 <Tooltip cursor={{strokeDasharray: '3 3'}} contentStyle={{ borderRadius: '8px', border: 'none' }} />
                                 <Scatter name="Complaints" data={scatterData} fill="#8b5cf6" opacity={0.6} />
-                                {/* Standard 30min SLA Threshold Line (Visual representation) */}
                                 <Line dataKey="time" stroke="red" strokeDasharray="5 5" />
                               </ScatterChart>
                             </ResponsiveContainer>
@@ -738,10 +1134,9 @@ export default function App() {
                 </div>
               )}
 
-              {/* TAB 3: ASSETS & HOTSPOTS */}
+              {/* TAB 3: ASSETS & HOTSPOTS — UNCHANGED */}
               {activeTab === 'assets' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                       <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
                         <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Territorial Watering Point Map</h3>
@@ -787,10 +1182,9 @@ export default function App() {
                 </div>
               )}
 
-              {/* TAB 4: SENTIMENT & FEEDBACK */}
+              {/* TAB 4: SENTIMENT & FEEDBACK — UNCHANGED */}
               {activeTab === 'sentiment' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                       <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm h-[400px] overflow-hidden flex flex-col">
                         <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">Sentiment Word Cloud</h3></div>
