@@ -150,14 +150,14 @@ const navItemsList = [
 ];
 
 const MetricCard = ({ title, value, todayValue, icon: Icon, accent, sparkColor, sparklineData, dataKey, onTodayClick, infoText, isCritical, extraIcon, subtext }) => (
-  <div className={`relative hover:z-[100] bg-white dark:bg-slate-900 rounded-xl p-5 shadow-sm border ${isCritical ? 'border-rose-400 bg-rose-50 dark:bg-rose-950/20' : 'border-slate-100 dark:border-slate-800'} flex flex-col justify-between transition-colors h-32`}>
-    <div className="relative z-10 flex justify-between items-start mb-1">
+  <div className={`relative hover:z-[1000] bg-white dark:bg-slate-900 rounded-xl p-5 shadow-sm border ${isCritical ? 'border-rose-400 bg-rose-50 dark:bg-rose-950/20' : 'border-slate-100 dark:border-slate-800'} flex flex-col justify-between transition-colors h-32`}>
+    <div className="relative z-[50] flex justify-between items-start mb-1">
       <div className="flex items-center">
         <p className={`text-[11px] font-bold uppercase tracking-wider ${isCritical ? 'text-rose-700 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400'}`}>{title}</p>
         {infoText && (
-          <div className="relative group ml-1.5 flex items-center justify-center">
+          <div className="relative group/tooltip ml-1.5 flex items-center justify-center">
             <div className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[9px] font-black cursor-help ${isCritical ? 'bg-rose-200 text-rose-700 dark:bg-rose-900 dark:text-rose-300' : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>i</div>
-            <div className="absolute top-full right-[-10px] md:left-1/2 md:-translate-x-1/2 mt-2 w-48 p-2.5 bg-slate-800 dark:bg-slate-700 text-white text-xs font-medium rounded-lg shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-[999] text-center leading-tight">
+            <div className="absolute top-full right-[-10px] md:left-1/2 md:-translate-x-1/2 mt-2 w-48 p-2.5 bg-slate-800 dark:bg-slate-700 text-white text-xs font-medium rounded-lg shadow-2xl opacity-0 group-hover/tooltip:opacity-100 pointer-events-none transition-opacity z-[9999] text-center leading-tight">
               {infoText}
               <div className="absolute bottom-full right-3 md:left-1/2 md:-translate-x-1/2 border-4 border-transparent border-b-slate-800 dark:border-b-slate-700"></div>
             </div>
@@ -199,7 +199,7 @@ const MetricCard = ({ title, value, todayValue, icon: Icon, accent, sparkColor, 
     </div>
     
     {sparklineData && sparklineData.length > 0 && (
-      <div className="absolute bottom-0 left-0 right-0 h-16 opacity-30 pointer-events-none overflow-hidden rounded-b-xl">
+      <div className="absolute bottom-0 left-0 right-0 h-16 opacity-30 pointer-events-none overflow-hidden rounded-b-xl z-0">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={sparklineData}>
             <Line type="monotone" dataKey={dataKey} stroke={sparkColor} strokeWidth={3} dot={false} isAnimationActive={false} />
@@ -616,7 +616,6 @@ export default function App() {
       sparkObj.total++;
       if (isToday) kpisToday.total++;
 
-      // BUG FIX: Added 'bed roll' to match un-concatenated strings
       if (catLow.includes('bedroll') || catLow.includes('bed roll') || catLow.includes('linen')) { kpis.bedroll++; sparkObj.bedroll++; if(isToday) kpisToday.bedroll++; }
       if (catLow.includes('clean') || catLow.includes('dirt')) { kpis.clean++; sparkObj.clean++; if(isToday) kpisToday.clean++; }
       if (catLow.includes('water') || catLow.includes('plumb')) { kpis.water++; sparkObj.water++; if(isToday) kpisToday.water++; }
@@ -1233,6 +1232,15 @@ export default function App() {
           >
             <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Wipe Entire System
           </button>
+          
+          {/* NEURALMESH BRANDING */}
+          <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-700 flex flex-col items-center justify-center">
+            <span className="text-[9px] font-bold tracking-widest uppercase text-slate-400 dark:text-slate-500">Powered by</span>
+            <div className="flex items-center mt-1">
+               <Activity className="w-3 h-3 text-indigo-600 mr-1" />
+               <span className="text-xs font-black tracking-wide text-indigo-600 dark:text-indigo-400">NeuralMesh</span>
+            </div>
+          </div>
         </div>
       </aside>
 
