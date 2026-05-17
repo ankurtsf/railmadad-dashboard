@@ -22,6 +22,42 @@ export default function ViewComplaints({ userRole }) {
   const [exportFields, setExportFields] = useState(null)
   const [showExportModal, setShowExportModal] = useState(false)
 
+  // Passenger coach number state
+  const [coachEdits, setCoachEdits] = useState({}) // { complaintId: { letter: 'A', number: '1' } }
+  const [savingCoach, setSavingCoach] = useState({}) // { complaintId: true/false }
+
+  const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
+  const NUMBERS = Array.from({ length: 20 }, (_, i) => String(i + 1))
+
+  const getCoachEdit = (c) => {
+    if (coachEdits[c.id]) return coachEdits[c.id]
+    // Parse existing passenger_coach_no
+    const existing = c.passenger_coach_no || ''
+    const match = existing.match(/^([A-Z]+)(\d+)$/)
+    return {
+      letter: match ? match[1] : '',
+      number: match ? match[2] : ''
+    }
+  }
+
+  const handleSaveCoach = async (complaintId) => {
+    const edit = coachEdits[complaintId]
+    if (!edit || !edit.letter || !edit.number) return
+    const coachNo = `${edit.letter}${edit.number}`
+    setSavingCoach(p => ({ ...p, [complaintId]: true }))
+    try {
+      const { error } = await supabase
+        .from('complaints')
+        .update({ passenger_coach_no: coachNo })
+        .eq('id', complaintId)
+      if (!error) {
+        setComplaints(prev => prev.map(c => c.id === complaintId ? { ...c, passenger_coach_no: coachNo } : c))
+        setCoachEdits(p => { const n = { ...p }; delete n[complaintId]; return n })
+      }
+    } catch (err) { console.error(err) }
+    finally { setSavingCoach(p => ({ ...p, [complaintId]: false })) }
+  }
+
   useEffect(() => { fetchComplaints() }, [])
 
   const fetchComplaints = async () => {
@@ -217,7 +253,7 @@ export default function ViewComplaints({ userRole }) {
           <table className="min-w-full border-collapse">
             <thead className="bg-gray-50 sticky top-0">
               <tr>
-                {['Sr.', 'Ref No', 'Created On', 'Status', 'Mode', 'Train', 'Coach', 'Complaint Type', 'Sub Type', 'Zone', 'Div', 'Next Station', 'Rating', 'SLA', 'Res. Time', 'Actions'].map(h => (
+                {['Sr.', 'Ref No', 'Created On', 'Status', 'Mode', 'Train', 'Coach', 'Complaint Type', 'Sub Type', 'Zone', 'Div', 'Next Station', 'Journey Start Date', 'Passenger Coach', 'Rating', 'SLA', 'Res. Time', 'Actions'].map(h => (
                   <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-200 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -225,7 +261,7 @@ export default function ViewComplaints({ userRole }) {
             <tbody className="divide-y divide-gray-100">
               {paginated.length === 0 ? (
                 <tr>
-                  <td colSpan={16} className="px-4 py-12 text-center text-gray-400 text-sm">
+                  <td colSpan={18} className="px-4 py-12 text-center text-gray-400 text-sm">
                     No complaints found matching your filters
                   </td>
                 </tr>
@@ -267,6 +303,54 @@ export default function ViewComplaints({ userRole }) {
                   <td className="px-3 py-3 text-xs text-gray-600">{c.zone_code || '-'}</td>
                   <td className="px-3 py-3 text-xs text-gray-600">{c.div_code || '-'}</td>
                   <td className="px-3 py-3 text-xs text-gray-600 whitespace-nowrap">{c.next_station || '-'}</td>
+                  <td className="px-3 py-3 text-xs whitespace-nowrap">
+                    {c.suggested_journey_start_date ? (
+                      <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-xs font-medium">
+                        {new Date(c.suggested_journey_start_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </span>
+                    ) : (
+                      <span className="text-gray-300">-</span>
+                    )}
+                  </td>
+                  {/* Passenger Coach Number */}
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    {(() => {
+                      const edit = getCoachEdit(c)
+                      const hasChange = coachEdits[c.id] !== undefined
+                      return (
+                        <div className="flex items-center gap-1">
+                          <select
+                            value={edit.letter}
+                            onChange={e => setCoachEdits(p => ({ ...p, [c.id]: { ...getCoachEdit(c), letter: e.target.value } }))}
+                            className="border border-gray-200 rounded px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white w-12"
+                          >
+                            <option value="">-</option>
+                            {LETTERS.map(l => <option key={l} value={l}>{l}</option>)}
+                          </select>
+                          <select
+                            value={edit.number}
+                            onChange={e => setCoachEdits(p => ({ ...p, [c.id]: { ...getCoachEdit(c), number: e.target.value } }))}
+                            className="border border-gray-200 rounded px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white w-12"
+                          >
+                            <option value="">-</option>
+                            {NUMBERS.map(n => <option key={n} value={n}>{n}</option>)}
+                          </select>
+                          {hasChange && (
+                            <button
+                              onClick={() => handleSaveCoach(c.id)}
+                              disabled={savingCoach[c.id]}
+                              className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-2 py-0.5 rounded font-medium disabled:opacity-50"
+                            >
+                              {savingCoach[c.id] ? '...' : 'Save'}
+                            </button>
+                          )}
+                          {!hasChange && c.passenger_coach_no && (
+                            <span className="bg-green-100 text-green-700 text-xs px-1.5 py-0.5 rounded font-bold">{c.passenger_coach_no}</span>
+                          )}
+                        </div>
+                      )
+                    })()}
+                  </td>
                   <td className="px-3 py-3">
                     {c.rating && c.rating !== 'Not Rated' && c.rating !== '' ? (
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${

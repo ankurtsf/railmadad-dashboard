@@ -49,6 +49,56 @@ export default function AddComplaint() {
   const [showForm, setShowForm] = useState(false)
   const fileInputRef = useRef(null)
 
+  // Calculate suggested journey start date
+  // Logic: complaint train_no + next_station + created_on time → match against train_stations schedule
+  const calculateJourneyStartDate = (complaint, trainStationsMap) => {
+    try {
+      const trainNo = String(complaint.train_no || '').trim()
+      const nextStation = String(complaint.next_station || '').trim().toUpperCase()
+      const complaintTime = complaint.created_on ? new Date(complaint.created_on) : null
+
+      if (!trainNo || !nextStation || !complaintTime) return null
+
+      // Get stations for this train
+      const stations = trainStationsMap[trainNo]
+      if (!stations || stations.length === 0) return null
+
+      // Find the next_station in the route
+      const matchStation = stations.find(s =>
+        s.station_code?.toUpperCase() === nextStation ||
+        s.station_name?.toUpperCase().includes(nextStation) ||
+        nextStation.includes(s.station_code?.toUpperCase())
+      )
+
+      if (!matchStation) return null
+
+      // Get the arrival time at this station
+      const arrivalTime = matchStation.arrival_time // e.g. "02:35"
+      if (!arrivalTime) return null
+
+      const [arrHour, arrMin] = arrivalTime.split(':').map(Number)
+      const dayOffset = matchStation.sequence_no <= 1 ? 0 : (matchStation.day_offset || 1)
+
+      // Calculate journey start date
+      // complaint date - dayOffset = journey start date
+      const complaintDate = new Date(complaintTime)
+      const journeyStartDate = new Date(complaintDate)
+      journeyStartDate.setDate(journeyStartDate.getDate() - dayOffset)
+
+      // Verify: complaint time should be close to station arrival time
+      const complaintHour = complaintDate.getHours()
+      const complaintMin = complaintDate.getMinutes()
+      const timeDiffMins = Math.abs((complaintHour * 60 + complaintMin) - (arrHour * 60 + arrMin))
+
+      // If time difference > 3 hours, less confident but still return
+      if (timeDiffMins > 180) return null
+
+      return journeyStartDate.toISOString().split('T')[0]
+    } catch (e) {
+      return null
+    }
+  }
+
   // Manual form state
   const [form, setForm] = useState({
     complaint_ref_no: '', created_on: '', status: 'Open',
@@ -176,6 +226,23 @@ export default function AddComplaint() {
           return idx !== undefined ? row[idx] : null
         }
 
+        // Fetch train stations for journey mapping
+        const { data: trainStationsData } = await supabase
+          .from('train_stations')
+          .select('train_id, station_code, station_name, sequence_no, arrival_time, trains(train_no)')
+
+        // Build train stations map: trainNo -> stations[]
+        const trainStationsMap = {}
+        ;(trainStationsData || []).forEach(s => {
+          const trainNo = s.trains?.train_no
+          if (!trainNo) return
+          if (!trainStationsMap[trainNo]) trainStationsMap[trainNo] = []
+          trainStationsMap[trainNo].push({
+            ...s,
+            day_offset: s.sequence_no > 10 ? 1 : 0 // rough estimate
+          })
+        })
+
         // Fetch existing ref nos to avoid duplicates
         const { data: existing } = await supabase
           .from('complaints')
@@ -257,7 +324,13 @@ export default function AddComplaint() {
               coach_owning_railway: clean(get(row, 'coachowningrailway')),
               prev_watering_station: clean(get(row, 'previouswateringstation')),
               next_watering_station: clean(get(row, 'nextwateringstation')),
+              suggested_journey_start_date: null, // will calculate below
             })
+
+            // Calculate journey start date
+            const lastRecord = toInsert[toInsert.length - 1]
+            const journeyDate = calculateJourneyStartDate(lastRecord, trainStationsMap)
+            if (journeyDate) lastRecord.suggested_journey_start_date = journeyDate
 
             existingSet.add(refNo)
           } catch (rowErr) {

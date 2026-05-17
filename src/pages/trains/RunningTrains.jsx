@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase'
 import {
   Train, Plus, Search, Edit, Trash2, Eye, MapPin,
   Calendar, Clock, CheckCircle, AlertTriangle, Download,
-  ChevronRight, Star, Droplets, Wrench, X
+  ChevronRight, Star, Droplets, Wrench, X, Upload
 } from 'lucide-react'
 import { LoadingSpinner, Modal, Button, Input, Select, Card, Toast, TabBar, Badge } from '../../components/ui/index'
 import * as XLSX from 'xlsx'
@@ -101,6 +101,124 @@ export default function RunningTrains({ userRole }) {
     if (!error) fetchTrains()
   }
 
+  // Handle Excel upload for station data
+  const handleStationExcelUpload = async (e, trainId) => {
+    const file = e.target.files[0]
+    if (!file) return
+
+    if (!window.XLSX) {
+      await new Promise(res => {
+        const s = document.createElement('script')
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
+        s.onload = res
+        document.head.appendChild(s)
+      })
+    }
+
+    const reader = new FileReader()
+    reader.onload = async (evt) => {
+      try {
+        const workbook = window.XLSX.read(evt.target.result, { type: 'array' })
+        let allRecords = []
+
+        // Process each sheet
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName]
+          const rows = window.XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null })
+
+          // Find train number from title row
+          let targetTrainId = trainId
+          const titleRow = rows[0]
+          if (titleRow && titleRow[0]) {
+            const titleMatch = String(titleRow[0]).match(/\b(\d{4,5})\b/)
+            if (titleMatch) {
+              // Find matching train in DB
+              const matchingTrain = trains.find(t => t.train_no === titleMatch[1])
+              if (matchingTrain) targetTrainId = matchingTrain.id
+            }
+          }
+
+          // Parse stations - 2 rows per station
+          let seqNo = 1
+          let i = 2 // Skip title and header rows
+          while (i < rows.length) {
+            const row1 = rows[i]
+            const row2 = rows[i + 1]
+            if (!row1) { i += 2; continue }
+
+            const srNo = row1[0]
+            if (!srNo || isNaN(Number(srNo))) { i++; continue }
+
+            const stationName = String(row1[1] || '').trim()
+            const arrTime = row1[3]
+            const halt = String(row1[4] || '').trim()
+            const isWatering = String(row1[6] || '').toLowerCase().includes('y') || String(row1[6] || '') === '1'
+            const isMaintenance = String(row1[7] || '').toLowerCase().includes('y') || String(row1[7] || '') === '1'
+
+            const stationCode = row2 ? String(row2[1] || '').trim().replace(/\s.*/, '') : ''
+            const depTime = row2 ? row2[3] : null
+
+            // Format times
+            const formatTime = (t) => {
+              if (!t) return null
+              if (typeof t === 'object' && t instanceof Date) {
+                return `${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`
+              }
+              if (typeof t === 'string') {
+                const match = t.match(/(\d{1,2}):(\d{2})/)
+                return match ? `${match[1].padStart(2,'0')}:${match[2]}` : null
+              }
+              return null
+            }
+
+            // Parse halt minutes
+            const haltMatch = halt.match(/(\d+)/)
+            const stoppageMinutes = haltMatch ? parseInt(haltMatch[1]) : 0
+
+            const isSource = String(arrTime).toUpperCase() === 'SRC'
+            const isDest = String(depTime || '').toUpperCase() === 'DSTN'
+
+            if (stationCode && stationName) {
+              allRecords.push({
+                train_id: targetTrainId,
+                station_code: stationCode.substring(0, 10),
+                station_name: stationName.substring(0, 100),
+                sequence_no: seqNo++,
+                arrival_time: isSource ? null : formatTime(arrTime),
+                departure_time: isDest ? null : formatTime(depTime),
+                stoppage_minutes: stoppageMinutes,
+                is_watering_station: isWatering,
+                is_maintenance_station: isMaintenance,
+                is_source: isSource,
+                is_destination: isDest,
+              })
+            }
+            i += 2
+          }
+        }
+
+        if (allRecords.length > 0) {
+          // Delete existing stations for this train first
+          await supabase.from('train_stations').delete().eq('train_id', trainId)
+          // Insert new stations
+          const { error } = await supabase.from('train_stations').insert(allRecords)
+          if (!error) {
+            showToast(`✅ Added ${allRecords.length} stations successfully!`, 'success')
+            fetchTrains()
+          } else {
+            showToast(`Error: ${error.message}`, 'error')
+          }
+        } else {
+          showToast('No station data found in file', 'error')
+        }
+      } catch (err) {
+        showToast(`Error: ${err.message}`, 'error')
+      }
+    }
+    reader.readAsArrayBuffer(file)
+    e.target.value = null
+  }
+
   const handleAddStation = async (e) => {
     e.preventDefault()
     if (!stationForm.station_code || !selectedTrain) return
@@ -116,9 +234,11 @@ export default function RunningTrains({ userRole }) {
     } else showToast(`Error: ${error.message}`, 'error')
   }
 
-  const handleDeleteStation = async (id) => {
+  const handleDeleteStation = async (id, stationName) => {
+    if (!confirm(`Are you sure you want to delete station "${stationName}"?`)) return
     const { error } = await supabase.from('train_stations').delete().eq('id', id)
     if (!error) { showToast('Station removed', 'success'); fetchTrains() }
+    else showToast(`Error: ${error.message}`, 'error')
   }
 
   const handleCreateJourneys = async () => {
@@ -469,10 +589,28 @@ export default function RunningTrains({ userRole }) {
                           <td className="px-3 py-2 text-xs text-gray-600">{s.arrival_time || '-'}</td>
                           <td className="px-3 py-2 text-xs text-gray-600">{s.departure_time || '-'}</td>
                           <td className="px-3 py-2 text-xs text-gray-600">{s.stoppage_minutes}m</td>
-                          <td className="px-3 py-2 text-center">{s.is_watering_station ? '💧' : '-'}</td>
-                          <td className="px-3 py-2 text-center">{s.is_maintenance_station ? '🔧' : '-'}</td>
+                          <td className="px-3 py-2 text-center">
+                            <button
+                              onClick={async () => {
+                                const { error } = await supabase.from('train_stations').update({ is_watering_station: !s.is_watering_station }).eq('id', s.id)
+                                if (!error) { showToast('Updated!', 'success'); fetchTrains() }
+                              }}
+                              className={`text-lg transition-opacity ${s.is_watering_station ? 'opacity-100' : 'opacity-20 hover:opacity-60'}`}
+                              title="Toggle Watering Station"
+                            >💧</button>
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            <button
+                              onClick={async () => {
+                                const { error } = await supabase.from('train_stations').update({ is_maintenance_station: !s.is_maintenance_station }).eq('id', s.id)
+                                if (!error) { showToast('Updated!', 'success'); fetchTrains() }
+                              }}
+                              className={`text-lg transition-opacity ${s.is_maintenance_station ? 'opacity-100' : 'opacity-20 hover:opacity-60'}`}
+                              title="Toggle Maintenance Station"
+                            >🔧</button>
+                          </td>
                           <td className="px-3 py-2">
-                            <button onClick={() => handleDeleteStation(s.id)} className="text-red-400 hover:text-red-600">
+                            <button onClick={() => handleDeleteStation(s.id, s.station_name)} className="text-red-400 hover:text-red-600">
                               <X className="w-3.5 h-3.5" />
                             </button>
                           </td>
@@ -484,9 +622,27 @@ export default function RunningTrains({ userRole }) {
               )}
             </div>
 
+            {/* Excel Upload */}
+            <div className="border-t border-gray-100 pt-4 mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-semibold text-gray-800 text-sm">Upload Stations from Excel</h4>
+                <label className="cursor-pointer bg-green-600 hover:bg-green-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                  <Upload className="w-3.5 h-3.5" />
+                  Upload Excel
+                  <input
+                    type="file"
+                    accept=".xlsx,.csv"
+                    className="hidden"
+                    onChange={e => handleStationExcelUpload(e, selectedTrain.id)}
+                  />
+                </label>
+              </div>
+              <p className="text-xs text-gray-400">Upload Train_Status.xlsx format — existing stations will be replaced</p>
+            </div>
+
             {/* Add station form */}
             <div className="border-t border-gray-100 pt-4">
-              <h4 className="font-semibold text-gray-800 mb-3 text-sm">Add Station</h4>
+              <h4 className="font-semibold text-gray-800 mb-3 text-sm">Add Station Manually</h4>
               <form onSubmit={handleAddStation} className="space-y-3">
                 <div className="grid grid-cols-3 gap-3">
                   <Input label="Seq No" type="number" placeholder="1" value={stationForm.sequence_no} onChange={e => setStationForm(p => ({ ...p, sequence_no: e.target.value }))} />
