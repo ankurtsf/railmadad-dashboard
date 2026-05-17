@@ -23,21 +23,22 @@ export default function ViewComplaints({ userRole }) {
   const [showExportModal, setShowExportModal] = useState(false)
 
   // Passenger coach number state
-  const [coachEdits, setCoachEdits] = useState({}) // { complaintId: { letter: 'A', number: '1' } }
-  const [savingCoach, setSavingCoach] = useState({}) // { complaintId: true/false }
+  const [coachEdits, setCoachEdits] = useState({})
+  const [savingCoach, setSavingCoach] = useState({})
+
+  // Root cause state
+  const [rootCauses, setRootCauses] = useState([])
+  const [rootCauseEdits, setRootCauseEdits] = useState({})
+  const [savingRootCause, setSavingRootCause] = useState({})
 
   const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
   const NUMBERS = Array.from({ length: 20 }, (_, i) => String(i + 1))
 
   const getCoachEdit = (c) => {
     if (coachEdits[c.id]) return coachEdits[c.id]
-    // Parse existing passenger_coach_no
     const existing = c.passenger_coach_no || ''
     const match = existing.match(/^([A-Z]+)(\d+)$/)
-    return {
-      letter: match ? match[1] : '',
-      number: match ? match[2] : ''
-    }
+    return { letter: match ? match[1] : '', number: match ? match[2] : '' }
   }
 
   const handleSaveCoach = async (complaintId) => {
@@ -46,10 +47,7 @@ export default function ViewComplaints({ userRole }) {
     const coachNo = `${edit.letter}${edit.number}`
     setSavingCoach(p => ({ ...p, [complaintId]: true }))
     try {
-      const { error } = await supabase
-        .from('complaints')
-        .update({ passenger_coach_no: coachNo })
-        .eq('id', complaintId)
+      const { error } = await supabase.from('complaints').update({ passenger_coach_no: coachNo }).eq('id', complaintId)
       if (!error) {
         setComplaints(prev => prev.map(c => c.id === complaintId ? { ...c, passenger_coach_no: coachNo } : c))
         setCoachEdits(p => { const n = { ...p }; delete n[complaintId]; return n })
@@ -58,7 +56,33 @@ export default function ViewComplaints({ userRole }) {
     finally { setSavingCoach(p => ({ ...p, [complaintId]: false })) }
   }
 
-  useEffect(() => { fetchComplaints() }, [])
+  // Get root causes for a specific category + subtype
+  const getRootCauseOptions = (category, subType) => {
+    return rootCauses
+      .filter(r => r.is_active && r.category === category && r.sub_type === subType)
+      .map(r => r.root_cause)
+  }
+
+  const handleSaveRootCause = async (complaintId, value) => {
+    setSavingRootCause(p => ({ ...p, [complaintId]: true }))
+    try {
+      const { error } = await supabase.from('complaints').update({ root_cause: value }).eq('id', complaintId)
+      if (!error) {
+        setComplaints(prev => prev.map(c => c.id === complaintId ? { ...c, root_cause: value } : c))
+        setRootCauseEdits(p => { const n = { ...p }; delete n[complaintId]; return n })
+      }
+    } catch (err) { console.error(err) }
+    finally { setSavingRootCause(p => ({ ...p, [complaintId]: false })) }
+  }
+
+  useEffect(() => { fetchComplaints(); fetchRootCauses() }, [])
+
+  const fetchRootCauses = async () => {
+    try {
+      const { data } = await supabase.from('root_causes').select('*').eq('is_active', true)
+      setRootCauses(data || [])
+    } catch (err) { console.error(err) }
+  }
 
   const fetchComplaints = async () => {
     setLoading(true)
@@ -253,7 +277,7 @@ export default function ViewComplaints({ userRole }) {
           <table className="min-w-full border-collapse">
             <thead className="bg-gray-50 sticky top-0">
               <tr>
-                {['Sr.', 'Ref No', 'Created On', 'Status', 'Mode', 'Train', 'Coach', 'Complaint Type', 'Sub Type', 'Zone', 'Div', 'Next Station', 'Journey Start Date', 'Passenger Coach', 'Rating', 'SLA', 'Res. Time', 'Actions'].map(h => (
+                {['Sr.', 'Ref No', 'Created On', 'Status', 'Mode', 'Train', 'Coach', 'Complaint Type', 'Sub Type', 'Zone', 'Div', 'Next Station', 'Journey Start Date', 'Passenger Coach', 'Root Cause', 'Rating', 'SLA', 'Res. Time', 'Actions'].map(h => (
                   <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-200 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -261,7 +285,7 @@ export default function ViewComplaints({ userRole }) {
             <tbody className="divide-y divide-gray-100">
               {paginated.length === 0 ? (
                 <tr>
-                  <td colSpan={18} className="px-4 py-12 text-center text-gray-400 text-sm">
+                  <td colSpan={19} className="px-4 py-12 text-center text-gray-400 text-sm">
                     No complaints found matching your filters
                   </td>
                 </tr>
@@ -346,6 +370,38 @@ export default function ViewComplaints({ userRole }) {
                           )}
                           {!hasChange && c.passenger_coach_no && (
                             <span className="bg-green-100 text-green-700 text-xs px-1.5 py-0.5 rounded font-bold">{c.passenger_coach_no}</span>
+                          )}
+                        </div>
+                      )
+                    })()}
+                  </td>
+                  {/* Root Cause */}
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    {(() => {
+                      const rcOptions = getRootCauseOptions(c.comp_type_name, c.sub_type_name)
+                      const currentValue = rootCauseEdits[c.id] !== undefined ? rootCauseEdits[c.id] : (c.root_cause || '')
+                      const hasChange = rootCauseEdits[c.id] !== undefined && rootCauseEdits[c.id] !== c.root_cause
+                      return (
+                        <div className="flex items-center gap-1">
+                          <select
+                            value={currentValue}
+                            onChange={e => setRootCauseEdits(p => ({ ...p, [c.id]: e.target.value }))}
+                            className={`border rounded px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-400 bg-white max-w-[140px]
+                              ${rcOptions.length === 0 ? 'text-gray-300 border-gray-100' : 'border-gray-200'}
+                              ${currentValue ? 'border-green-300' : ''}`}
+                            disabled={rcOptions.length === 0}
+                          >
+                            <option value="">{rcOptions.length === 0 ? 'No causes set' : 'Select...'}</option>
+                            {rcOptions.map(r => <option key={r} value={r}>{r}</option>)}
+                          </select>
+                          {hasChange && (
+                            <button
+                              onClick={() => handleSaveRootCause(c.id, rootCauseEdits[c.id])}
+                              disabled={savingRootCause[c.id]}
+                              className="bg-green-600 hover:bg-green-700 text-white text-xs px-2 py-0.5 rounded font-medium disabled:opacity-50"
+                            >
+                              {savingRootCause[c.id] ? '...' : 'Save'}
+                            </button>
                           )}
                         </div>
                       )
